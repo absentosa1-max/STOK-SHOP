@@ -1,0 +1,6 @@
+{
+  "name": "StockMaster Inventory System",
+  "description": "Professional stock and inventory management system with secure authentication, stock adjustment tracking, category filtering, and export capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

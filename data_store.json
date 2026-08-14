@@ -1,0 +1,153 @@
+{
+  "products": [
+    {
+      "id": "001",
+      "name": "ThinkPad T14 Gen 3",
+      "description": "Laptop Bisnis, Intel Core i7",
+      "sku": "LPT-TP14-G3",
+      "category": "Elektronik",
+      "size": "—",
+      "color": "—",
+      "stock": 0,
+      "price": 24500000,
+      "minThreshold": 10,
+      "lastUpdated": "2026-08-12 20:00"
+    },
+    {
+      "id": "002",
+      "name": "Polo Shirt Premium",
+      "description": "Bahan Katun Combed 30s",
+      "sku": "APP-POLO-01",
+      "category": "Pakaian",
+      "size": "M",
+      "color": "Hitam",
+      "colorHex": "#191c1e",
+      "stock": 0,
+      "price": 150000,
+      "hasVariants": true,
+      "minThreshold": 15,
+      "lastUpdated": "2026-08-12 20:00",
+      "variants": [
+        {
+          "id": "002-v1",
+          "sku": "APP-POLO-02",
+          "size": "L",
+          "color": "Hitam",
+          "colorHex": "#191c1e",
+          "stock": 0,
+          "price": 150000
+        },
+        {
+          "id": "002-v2",
+          "sku": "APP-POLO-03",
+          "size": "XL",
+          "color": "Putih",
+          "colorHex": "#ffffff",
+          "stock": 0,
+          "price": 150000
+        }
+      ]
+    },
+    {
+      "id": "003",
+      "name": "Kertas A4 PaperOne 80gsm",
+      "description": "1 Rim (500 Lembar)",
+      "sku": "OFF-A4P1-80",
+      "category": "Office",
+      "size": "—",
+      "color": "—",
+      "stock": 0,
+      "price": 55000,
+      "minThreshold": 30,
+      "lastUpdated": "2026-08-12 20:00"
+    },
+    {
+      "id": "004",
+      "name": "Logitech MX Master 3S",
+      "description": "Wireless Mouse, Pale Gray",
+      "sku": "LPT-MX3S-PG",
+      "category": "Elektronik",
+      "size": "—",
+      "color": "Pale Gray",
+      "colorHex": "#d9dadc",
+      "stock": 0,
+      "price": 1650000,
+      "minThreshold": 5,
+      "lastUpdated": "2026-08-12 20:00"
+    },
+    {
+      "id": "005",
+      "name": "Meja Kerja Ergonomis Digital Height",
+      "description": "Electric Standing Desk 140x70cm",
+      "sku": "FNT-SDK-140",
+      "category": "Furniture",
+      "size": "140x70",
+      "color": "Hitam",
+      "colorHex": "#191c1e",
+      "stock": 0,
+      "price": 4800000,
+      "minThreshold": 5,
+      "lastUpdated": "2026-08-12 20:00"
+    },
+    {
+      "id": "006",
+      "name": "Kursi Kantor Mesh Ergonomic",
+      "description": "Lumbar Support Adjust & Headrest",
+      "sku": "FNT-CHR-MSH",
+      "category": "Furniture",
+      "size": "L",
+      "color": "Abu-Abu",
+      "colorHex": "#737685",
+      "stock": 0,
+      "price": 2150000,
+      "minThreshold": 8,
+      "lastUpdated": "2026-08-12 20:00"
+    },
+    {
+      "id": "007",
+      "name": "Monitor Dell UltraSharp 27\" 4K",
+      "description": "U2723QE USB-C Hub Monitor",
+      "sku": "ELE-DEL-U27",
+      "category": "Elektronik",
+      "size": "27 Inci",
+      "color": "Silver",
+      "colorHex": "#e1e2e4",
+      "stock": 0,
+      "price": 9200000,
+      "minThreshold": 10,
+      "lastUpdated": "2026-08-12 20:00"
+    },
+    {
+      "id": "008",
+      "name": "Pulpen Gel Pilot G2 0.5mm",
+      "description": "Box 12 pcs Tint Hitam",
+      "sku": "OFF-PLT-G2",
+      "category": "Office",
+      "size": "0.5mm",
+      "color": "Hitam",
+      "colorHex": "#191c1e",
+      "stock": 0,
+      "price": 185000,
+      "minThreshold": 20,
+      "lastUpdated": "2026-08-12 20:00"
+    }
+  ],
+  "logs": [],
+  "notifications": [],
+  "incomingRecords": [],
+  "outgoingRecords": [],
+  "users": [
+    {
+      "id": "usr-001",
+      "name": "Yanz",
+      "email": "yanz@abs.com",
+      "role": "primary_admin",
+      "roleLabel": "Administrator Utama",
+      "password": "yanz123",
+      "isPrimaryAdmin": true,
+      "status": "active",
+      "department": "Direksi & Sistem IT Ops",
+      "createdAt": "2026-08-12 00:00"
+    }
+  ]
+}
