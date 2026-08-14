@@ -27,7 +27,13 @@ import { StockHistoryModal } from './components/StockHistoryModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 
 export default function App() {
-  const [users, setUsers] = useState<UserAccount[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<UserAccount[]>(() => {
+    try {
+      const saved = localStorage.getItem('stockmaster_users');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_USERS;
+  });
   
   // Persist / restore logged-in session across page reloads & tabs
   const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
@@ -50,11 +56,45 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('inventory');
   const [selectedWarehouse, setSelectedWarehouse] = useState('Lantai 1');
 
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [logs, setLogs] = useState<StockLog[]>(INITIAL_LOGS);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
-  const [incomingRecords, setIncomingRecords] = useState<IncomingStockRecord[]>(INITIAL_INCOMING_RECORDS);
-  const [outgoingRecords, setOutgoingRecords] = useState<OutgoingStockRecord[]>(INITIAL_OUTGOING_RECORDS);
+  const [products, setProducts] = useState<Product[]>(() => {
+    try {
+      const saved = localStorage.getItem('stockmaster_products');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_PRODUCTS;
+  });
+
+  const [logs, setLogs] = useState<StockLog[]>(() => {
+    try {
+      const saved = localStorage.getItem('stockmaster_logs');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_LOGS;
+  });
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('stockmaster_notifications');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_NOTIFICATIONS;
+  });
+
+  const [incomingRecords, setIncomingRecords] = useState<IncomingStockRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('stockmaster_incoming');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_INCOMING_RECORDS;
+  });
+
+  const [outgoingRecords, setOutgoingRecords] = useState<OutgoingStockRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('stockmaster_outgoing');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_OUTGOING_RECORDS;
+  });
 
   // Realtime Sync setup via WebSocket & BroadcastChannel
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
@@ -63,7 +103,7 @@ export default function App() {
   const isRemoteChangeRef = useRef(false);
 
   useEffect(() => {
-    // 1. Cross-tab BroadcastChannel
+    // 1. Cross-tab BroadcastChannel (always active in any environment)
     if (typeof BroadcastChannel !== 'undefined') {
       const channel = new BroadcastChannel('stockmaster_realtime');
       channelRef.current = channel;
@@ -71,17 +111,24 @@ export default function App() {
         if (e.data?.type === 'SYNC_ALL' && e.data.data) {
           isRemoteChangeRef.current = true;
           const { products: p, logs: l, notifications: n, incomingRecords: inc, outgoingRecords: out, users: u } = e.data.data;
-          if (p) setProducts(p);
-          if (l) setLogs(l);
-          if (n) setNotifications(n);
-          if (inc) setIncomingRecords(inc);
-          if (out) setOutgoingRecords(out);
-          if (u) setUsers(u);
+          if (p) { setProducts(p); try { localStorage.setItem('stockmaster_products', JSON.stringify(p)); } catch (err) {} }
+          if (l) { setLogs(l); try { localStorage.setItem('stockmaster_logs', JSON.stringify(l)); } catch (err) {} }
+          if (n) { setNotifications(n); try { localStorage.setItem('stockmaster_notifications', JSON.stringify(n)); } catch (err) {} }
+          if (inc) { setIncomingRecords(inc); try { localStorage.setItem('stockmaster_incoming', JSON.stringify(inc)); } catch (err) {} }
+          if (out) { setOutgoingRecords(out); try { localStorage.setItem('stockmaster_outgoing', JSON.stringify(out)); } catch (err) {} }
+          if (u) { setUsers(u); try { localStorage.setItem('stockmaster_users', JSON.stringify(u)); } catch (err) {} }
         }
       };
     }
 
-    // 2. Full-stack WebSocket connection
+    // 2. Full-stack WebSocket connection (when running with backend server)
+    const isStaticHosting = window.location.hostname.endsWith('github.io') || window.location.protocol === 'file:';
+    if (isStaticHosting) {
+      // On static hosting (GitHub Pages), cross-tab BroadcastChannel and localStorage are active
+      setIsRealtimeConnected(true);
+      return;
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
 
@@ -117,7 +164,7 @@ export default function App() {
 
         socket.onclose = () => {
           setIsRealtimeConnected(false);
-          reconnectTimeout = setTimeout(connectWS, 3000);
+          reconnectTimeout = setTimeout(connectWS, 5000);
         };
 
         socket.onerror = () => {
@@ -137,8 +184,18 @@ export default function App() {
     };
   }, []);
 
-  // Sync state changes to server and other tabs whenever local state updates
+  // Sync state changes to server, localStorage, and other tabs whenever local state updates
   useEffect(() => {
+    // Persist to localStorage for static hosting / offline resilience
+    try {
+      localStorage.setItem('stockmaster_products', JSON.stringify(products));
+      localStorage.setItem('stockmaster_logs', JSON.stringify(logs));
+      localStorage.setItem('stockmaster_notifications', JSON.stringify(notifications));
+      localStorage.setItem('stockmaster_incoming', JSON.stringify(incomingRecords));
+      localStorage.setItem('stockmaster_outgoing', JSON.stringify(outgoingRecords));
+      localStorage.setItem('stockmaster_users', JSON.stringify(users));
+    } catch (err) {}
+
     if (isRemoteChangeRef.current) {
       isRemoteChangeRef.current = false;
       return;
