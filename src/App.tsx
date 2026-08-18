@@ -26,14 +26,30 @@ import { ExportModal } from './components/ExportModal';
 import { StockHistoryModal } from './components/StockHistoryModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 
+function loadStoredUsers(): UserAccount[] {
+  try {
+    const saved = localStorage.getItem('stockmaster_users');
+    if (saved) {
+      const parsed: UserAccount[] = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Ensure default initial users exist while retaining all user-added accounts
+        const merged = [...parsed];
+        for (const initUser of INITIAL_USERS) {
+          if (!merged.some((u) => u.email.toLowerCase().trim() === initUser.email.toLowerCase().trim())) {
+            merged.push(initUser);
+          }
+        }
+        return merged;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading stored users:', e);
+  }
+  return INITIAL_USERS;
+}
+
 export default function App() {
-  const [users, setUsers] = useState<UserAccount[]>(() => {
-    try {
-      const saved = localStorage.getItem('stockmaster_users');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return INITIAL_USERS;
-  });
+  const [users, setUsers] = useState<UserAccount[]>(loadStoredUsers);
   
   // Persist / restore logged-in session across page reloads & tabs
   const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
@@ -529,35 +545,68 @@ export default function App() {
   const handleAddUser = (userData: Omit<UserAccount, 'id' | 'createdAt'>) => {
     const newUser: UserAccount = {
       ...userData,
+      name: userData.name.trim(),
+      email: userData.email.trim(),
+      password: userData.password.trim(),
+      roleLabel: userData.roleLabel?.trim() || 'Staf Operasional',
+      department: userData.department?.trim() || 'Manajemen Gudang',
       id: `usr-${Date.now()}`,
       createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
     };
-    setUsers((prev) => [...prev, newUser]);
+    
+    setUsers((prev) => {
+      const updated = [...prev, newUser];
+      try {
+        localStorage.setItem('stockmaster_users', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
     showToast(`Akun ${newUser.name} (${newUser.roleLabel}) berhasil ditambahkan!`);
   };
 
   const handleUpdateUser = (userId: string, updatedData: Partial<UserAccount>) => {
-    setUsers((prev) =>
-      prev.map((u) => {
+    setUsers((prev) => {
+      const updated = prev.map((u) => {
         if (u.id === userId) {
-          const updated = { ...u, ...updatedData };
+          const mod = {
+            ...u,
+            ...updatedData,
+            name: updatedData.name !== undefined ? updatedData.name.trim() : u.name,
+            email: updatedData.email !== undefined ? updatedData.email.trim() : u.email,
+            password: updatedData.password !== undefined ? updatedData.password.trim() : u.password,
+            roleLabel: updatedData.roleLabel !== undefined ? updatedData.roleLabel.trim() : u.roleLabel,
+            department: updatedData.department !== undefined ? updatedData.department.trim() : u.department,
+          };
           if (currentUser?.id === userId) {
-            setCurrentUser(updated);
+            setCurrentUser(mod);
             try {
-              localStorage.setItem('stockmaster_auth', JSON.stringify(updated));
+              localStorage.setItem('stockmaster_auth', JSON.stringify(mod));
             } catch (e) {}
           }
-          return updated;
+          return mod;
         }
         return u;
-      })
-    );
+      });
+
+      try {
+        localStorage.setItem('stockmaster_users', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
     showToast(`Data akun pengguna telah diperbarui.`);
   };
 
   const handleDeleteUser = (userId: string) => {
     const targetUser = users.find((u) => u.id === userId);
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    setUsers((prev) => {
+      const updated = prev.filter((u) => u.id !== userId);
+      try {
+        localStorage.setItem('stockmaster_users', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
     showToast(`Akun ${targetUser?.name || ''} telah dihapus.`);
   };
 

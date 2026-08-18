@@ -1,13 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { UserAccount } from '../types';
+import { INITIAL_USERS } from '../data/initialUsers';
 
 interface LoginScreenProps {
   users: UserAccount[];
   onLoginSuccess: (user: UserAccount) => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess }) => {
-  const primaryAdmin = users.find((u) => u.isPrimaryAdmin) || users[0];
+export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLoginSuccess }) => {
+  // Combine prop users, localStorage users, and initial fallback users
+  const availableUsers = useMemo<UserAccount[]>(() => {
+    let stored: UserAccount[] = [];
+    try {
+      const raw = localStorage.getItem('stockmaster_users');
+      if (raw) {
+        stored = JSON.parse(raw);
+      }
+    } catch (e) {}
+
+    const map = new Map<string, UserAccount>();
+
+    // Priority: INITIAL_USERS -> stored users -> propUsers
+    INITIAL_USERS.forEach((u) => map.set(u.email.toLowerCase().trim(), u));
+    if (Array.isArray(stored)) {
+      stored.forEach((u) => {
+        if (u && u.email) map.set(u.email.toLowerCase().trim(), u);
+      });
+    }
+    if (Array.isArray(propUsers)) {
+      propUsers.forEach((u) => {
+        if (u && u.email) map.set(u.email.toLowerCase().trim(), u);
+      });
+    }
+
+    return Array.from(map.values());
+  }, [propUsers]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,8 +50,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
 
     setTimeout(() => {
       setIsLoading(false);
-      const matchedUser = users.find(
-        (u) => u.email.toLowerCase().trim() === email.toLowerCase().trim()
+      const cleanEmail = email.toLowerCase().trim();
+      const cleanPassword = password.trim();
+
+      // Find user from combined available users
+      const matchedUser = availableUsers.find(
+        (u) => u.email.toLowerCase().trim() === cleanEmail
       );
 
       if (!matchedUser) {
@@ -32,20 +63,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
         return;
       }
 
-      if (matchedUser.password !== password) {
+      if (matchedUser.password !== cleanPassword) {
         setErrorMessage('Security key / kata sandi yang Anda masukkan tidak valid.');
         return;
       }
 
       if (matchedUser.status === 'inactive') {
         setErrorMessage(
-          'Akun Anda saat ini NONAKTIF. Hubungi Administrator Utama (admin.utama@stockmaster.com) untuk mengaktifkan kembali.'
+          'Akun Anda saat ini NONAKTIF. Hubungi Administrator Utama untuk mengaktifkan kembali.'
         );
         return;
       }
 
+      // Successful login
       onLoginSuccess(matchedUser);
-    }, 600);
+    }, 400);
   };
 
   return (
@@ -64,7 +96,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
 
       {/* Main Login Box */}
       <div className="w-full max-w-[440px] bg-white border border-slate-200 rounded-2xl relative z-10 flex flex-col overflow-hidden shadow-xl">
-        <div className="p-8 flex flex-col items-center">
+        <div className="p-6 md:p-8 flex flex-col items-center">
           {/* Logo Badge */}
           <div className="w-14 h-14 bg-blue-600 rounded-xl flex items-center justify-center text-white font-extrabold mb-4 shadow-md">
             <span className="material-symbols-outlined text-[30px]">package_2</span>
@@ -74,7 +106,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
             StockMaster System
           </h1>
           <p className="text-xs font-medium text-slate-500 text-center mb-6">
-            Masuk untuk Mengelola Stok & Akses Pengguna
+            Masuk untuk Mengelola Stok & Akses Penanggung Jawab
           </p>
 
           {/* Error Message Alert */}
@@ -91,7 +123,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
             {/* Email Field */}
             <div className="flex flex-col gap-1.5">
               <label htmlFor="email" className="text-xs font-semibold text-slate-700">
-                Email Kerja
+                Email Penanggung Jawab
               </label>
               <div className="relative group">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors duration-200 pointer-events-none text-[18px]">
@@ -111,21 +143,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
 
             {/* Password Field */}
             <div className="flex flex-col gap-1.5">
-              <div className="flex justify-between items-center">
-                <label htmlFor="password" className="text-xs font-semibold text-slate-700">
-                  Kata Sandi
-                </label>
-                <a
-                  href="#reset"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('Gunakan email: "yanz@abs.com" dan kata sandi: "yanz123".');
-                  }}
-                  className="text-xs font-medium text-blue-600 hover:underline transition-colors"
-                >
-                  Bantuan Sandi?
-                </a>
-              </div>
+              <label htmlFor="password" className="text-xs font-semibold text-slate-700">
+                Kata Sandi
+              </label>
               <div className="relative group">
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors duration-200 pointer-events-none text-[18px]">
                   lock
@@ -162,7 +182,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
               <label htmlFor="remember" className="text-xs text-slate-600 cursor-pointer select-none">
-                Simpan sesi masuk (30 Hari)
+                Ingat sesi masuk
               </label>
             </div>
 
@@ -186,8 +206,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
               )}
             </button>
           </form>
-
-
         </div>
 
         {/* Card Footer */}
@@ -195,7 +213,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
           <span className="material-symbols-outlined text-[15px] text-blue-600">
             security
           </span>
-          <span>Akses Terenkripsi & Sistem Multi-Pengguna</span>
+          <span>Sistem Otorisasi Multi-Pengguna Terdaftar</span>
         </div>
       </div>
     </div>

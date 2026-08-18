@@ -19,6 +19,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserAccount | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -32,6 +33,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   });
 
   const handleOpenAddModal = () => {
+    setFormError(null);
     setFormData({
       name: '',
       email: '',
@@ -45,6 +47,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   };
 
   const handleOpenEditModal = (user: UserAccount) => {
+    setFormError(null);
     setEditingUser(user);
     setFormData({
       name: user.name,
@@ -59,13 +62,36 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
   const handleSubmitUser = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+
+    const cleanEmail = formData.email.toLowerCase().trim();
+    const cleanName = formData.name.trim();
+    const cleanPassword = formData.password.trim();
+
+    if (!cleanEmail || !cleanName || !cleanPassword) {
+      setFormError('Semua bidang wajib diisi.');
+      return;
+    }
+
+    // Check duplicate email
+    const duplicate = users.find(
+      (u) =>
+        u.email.toLowerCase().trim() === cleanEmail &&
+        (!editingUser || u.id !== editingUser.id)
+    );
+
+    if (duplicate) {
+      setFormError(`Email "${cleanEmail}" sudah digunakan oleh akun lain.`);
+      return;
+    }
+
     if (editingUser) {
       onUpdateUser(editingUser.id, {
-        name: formData.name,
-        email: formData.email,
-        roleLabel: formData.roleLabel,
-        department: formData.department,
-        password: formData.password,
+        name: cleanName,
+        email: cleanEmail,
+        roleLabel: formData.roleLabel.trim() || 'Staf Operasional',
+        department: formData.department.trim() || 'Manajemen Gudang',
+        password: cleanPassword,
         status: formData.status,
         role: formData.isPrimaryAdmin ? 'primary_admin' : 'staff',
         isPrimaryAdmin: formData.isPrimaryAdmin,
@@ -73,14 +99,14 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       setEditingUser(null);
     } else {
       onAddUser({
-        name: formData.name,
-        email: formData.email,
+        name: cleanName,
+        email: cleanEmail,
         role: formData.isPrimaryAdmin ? 'primary_admin' : 'staff',
-        roleLabel: formData.roleLabel || 'Staf Operasional',
-        password: formData.password || 'password123',
+        roleLabel: formData.roleLabel.trim() || 'Staf Operasional',
+        password: cleanPassword,
         isPrimaryAdmin: formData.isPrimaryAdmin,
         status: formData.status,
-        department: formData.department || 'Manajemen Gudang',
+        department: formData.department.trim() || 'Manajemen Gudang',
       });
       setIsAddModalOpen(false);
     }
@@ -332,6 +358,15 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmitUser} className="flex flex-col gap-4 text-xs font-sans">
+              {formError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-rose-600 shrink-0">
+                    warning
+                  </span>
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-slate-700 font-semibold mb-1 uppercase text-[11px] tracking-wider">
                   Nama Lengkap *
