@@ -7,7 +7,7 @@ import { db } from '../lib/firebase';
 interface LoginScreenProps {
   users: UserAccount[];
   sessionTimeoutMessage?: string | null;
-  onLoginSuccess: (user: UserAccount, remember: boolean) => void;
+  onLoginSuccess: (user: UserAccount) => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
@@ -77,7 +77,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -114,8 +113,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       }
 
       // Successful login
-      onLoginSuccess(matchedUser, remember);
-    }, 400);
+      onLoginSuccess(matchedUser);
+    }, 350);
   };
 
   return (
@@ -220,20 +219,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </div>
             </div>
 
-            {/* Remember Me */}
-            <div className="flex items-center gap-2 mt-1">
-              <input
-                id="remember"
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-              />
-              <label htmlFor="remember" className="text-xs text-slate-600 cursor-pointer select-none">
-                Ingat sesi masuk (Auto-logout jika tidak aktif 60 menit)
-              </label>
-            </div>
-
             {/* Submit Button */}
             <button
               type="submit"
@@ -257,11 +242,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         </div>
 
         {/* Card Footer */}
-        <div className="bg-slate-50 p-3.5 flex items-center justify-center gap-2 border-t border-slate-100 text-[11px] text-slate-500 font-medium">
-          <span className="material-symbols-outlined text-[15px] text-emerald-600">
-            shield_lock
+        <div className="bg-slate-50 p-3.5 flex items-center justify-center gap-2 border-t border-slate-100 text-[11px] text-slate-500 font-medium text-center">
+          <span className="material-symbols-outlined text-[15px] text-blue-600 shrink-0">
+            lock_reset
           </span>
-          <span>Keamanan Sesi: Logout Otomatis Setelah 60 Menit Inaktif</span>
+          <span>Wajib Login di Setiap Reload Tab / Buka Browser Baru</span>
         </div>
       </div>
     </div>

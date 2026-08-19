@@ -54,13 +54,13 @@ import {
 
 // 60 Minutes Inactivity Timeout
 const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
-const SESSION_STORAGE_KEY = 'stockmaster_session_auth';
 
-interface StoredSession {
-  user: UserAccount;
-  lastActive: number;
-  remember: boolean;
-}
+// Clean any legacy persistent auth keys on initial mount to guarantee fresh login
+try {
+  localStorage.removeItem('stockmaster_auth');
+  localStorage.removeItem('stockmaster_session_auth');
+  localStorage.removeItem('stockmaster_auth_session');
+} catch (e) {}
 
 function loadStoredUsers(): UserAccount[] {
   try {
@@ -83,59 +83,15 @@ function loadStoredUsers(): UserAccount[] {
   return INITIAL_USERS;
 }
 
-function getInitialSession(): {
-  user: UserAccount;
-  isLoggedIn: boolean;
-  timeoutMessage: string | null;
-} {
-  try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (raw) {
-      const session: StoredSession = JSON.parse(raw);
-      const now = Date.now();
-      const elapsed = now - (session.lastActive || 0);
-
-      if (elapsed < INACTIVITY_TIMEOUT_MS) {
-        // Valid active session within 60 minutes
-        const updatedSession = { ...session, lastActive: now };
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(updatedSession));
-        return {
-          user: session.user,
-          isLoggedIn: true,
-          timeoutMessage: null,
-        };
-      } else {
-        // Expired after 60 minutes of inactivity
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        return {
-          user: INITIAL_USERS[0],
-          isLoggedIn: false,
-          timeoutMessage: 'Sesi Anda telah kedaluwarsa karena tidak aktif selama lebih dari 60 menit. Silakan masuk kembali.',
-        };
-      }
-    }
-  } catch (e) {
-    console.error('Error reading stored session:', e);
-  }
-
-  // Default: Must login when opening link
-  return {
-    user: INITIAL_USERS[0],
-    isLoggedIn: false,
-    timeoutMessage: null,
-  };
-}
-
 export default function App() {
-  const initialSession = getInitialSession();
   const [users, setUsers] = useState<UserAccount[]>(loadStoredUsers);
-  const [currentUser, setCurrentUser] = useState<UserAccount>(initialSession.user);
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(initialSession.isLoggedIn);
-  const [sessionTimeoutMessage, setSessionTimeoutMessage] = useState<string | null>(
-    initialSession.timeoutMessage
-  );
+  
+  // Strictly requires login on every page reload, restart, or new tab
+  const [currentUser, setCurrentUser] = useState<UserAccount>(INITIAL_USERS[0]);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [sessionTimeoutMessage, setSessionTimeoutMessage] = useState<string | null>(null);
 
-  const [userEmail, setUserEmail] = useState(currentUser?.email || INITIAL_USERS[0].email);
+  const [userEmail, setUserEmail] = useState(INITIAL_USERS[0].email);
   const [activeTab, setActiveTab] = useState<NavigationTab>('inventory');
   const [selectedWarehouse, setSelectedWarehouse] = useState('Lantai 1');
 
@@ -200,16 +156,12 @@ export default function App() {
     }, 2800);
   };
 
-  // Activity timestamp ref to avoid unnecessary re-renders
+  // Activity timestamp ref
   const lastActivityRef = useRef<number>(Date.now());
-  const lastSyncRef = useRef<number>(Date.now());
 
   // Logout handler
   const handleLogout = useCallback((reason?: string) => {
     setIsLoggedIn(false);
-    try {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    } catch (e) {}
     if (reason) {
       setSessionTimeoutMessage(reason);
     } else {
@@ -224,21 +176,7 @@ export default function App() {
 
     // Record interaction and update timestamp
     const recordActivity = () => {
-      const now = Date.now();
-      lastActivityRef.current = now;
-
-      // Throttle localStorage writes to once every 15 seconds
-      if (now - lastSyncRef.current > 15000) {
-        lastSyncRef.current = now;
-        try {
-          const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-          if (raw) {
-            const session: StoredSession = JSON.parse(raw);
-            session.lastActive = now;
-            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-          }
-        } catch (e) {}
-      }
+      lastActivityRef.current = Date.now();
     };
 
     // User activity events
@@ -341,24 +279,12 @@ export default function App() {
     };
   }, []);
 
-  const handleLoginSuccess = (user: UserAccount, remember: boolean) => {
-    const now = Date.now();
+  const handleLoginSuccess = (user: UserAccount) => {
     setCurrentUser(user);
     setUserEmail(user.email);
     setIsLoggedIn(true);
     setSessionTimeoutMessage(null);
-    lastActivityRef.current = now;
-    lastSyncRef.current = now;
-
-    try {
-      const sessionData: StoredSession = {
-        user,
-        lastActive: now,
-        remember,
-      };
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionData));
-    } catch (e) {}
-
+    lastActivityRef.current = Date.now();
     showToast(`Selamat datang kembali, ${user.name}!`);
   };
 
@@ -410,14 +336,6 @@ export default function App() {
           targetUpdated = mod;
           if (currentUser?.id === userId) {
             setCurrentUser(mod);
-            try {
-              const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-              if (raw) {
-                const s = JSON.parse(raw);
-                s.user = mod;
-                localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(s));
-              }
-            } catch (e) {}
           }
           return mod;
         }
