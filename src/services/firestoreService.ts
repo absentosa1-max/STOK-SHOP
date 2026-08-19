@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   setDoc,
   deleteDoc,
   onSnapshot,
@@ -27,6 +28,7 @@ import {
 } from '../data/mockData';
 
 // Collection references
+const SYSTEM_COL = '_system';
 const USERS_COL = 'users';
 const PRODUCTS_COL = 'products';
 const LOGS_COL = 'logs';
@@ -54,14 +56,24 @@ function cleanPayload<T extends Record<string, any>>(obj: T): T {
 }
 
 /**
- * Bootstrap default data into Firestore if collections are empty on first run
+ * Bootstrap default data into Firestore ONCE on initial deployment.
+ * Never re-seed deleted items on subsequent reloads.
  */
 export async function bootstrapFirestoreDefaults() {
   try {
-    // Check users
+    // Check if system has already been initialized in Cloud or localStorage
+    const sysDocRef = doc(db, SYSTEM_COL, 'metadata');
+    const sysSnap = await getDoc(sysDocRef);
+
+    if (sysSnap.exists() && sysSnap.data()?.isBootstrapped) {
+      // System is already initialized. Never resurrect deleted items!
+      return;
+    }
+
+    // Check if users collection already exists
     const userSnap = await getDocs(collection(db, USERS_COL));
     if (userSnap.empty) {
-      console.log('[Firestore] Seeding default users...');
+      console.log('[Firestore] Initial seeding of users...');
       const batch = writeBatch(db);
       for (const u of INITIAL_USERS) {
         const docRef = doc(db, USERS_COL, u.id);
@@ -73,7 +85,7 @@ export async function bootstrapFirestoreDefaults() {
     // Check products
     const prodSnap = await getDocs(collection(db, PRODUCTS_COL));
     if (prodSnap.empty) {
-      console.log('[Firestore] Seeding default products...');
+      console.log('[Firestore] Initial seeding of products...');
       const batch = writeBatch(db);
       for (const p of INITIAL_PRODUCTS) {
         const docRef = doc(db, PRODUCTS_COL, p.id);
@@ -125,6 +137,13 @@ export async function bootstrapFirestoreDefaults() {
       }
       await batch.commit();
     }
+
+    // Mark system as permanently bootstrapped
+    await setDoc(sysDocRef, {
+      isBootstrapped: true,
+      initializedAt: new Date().toISOString(),
+      version: '1.0.0',
+    });
   } catch (err) {
     console.error('[Firestore] Error bootstrapping defaults:', err);
   }
@@ -149,11 +168,9 @@ export function subscribeToRealtimeData(callbacks: {
     const unsub = onSnapshot(
       collection(db, USERS_COL),
       (snap) => {
-        if (!snap.empty) {
-          const list: UserAccount[] = [];
-          snap.forEach((d) => list.push(d.data() as UserAccount));
-          callbacks.onUsers!(list);
-        }
+        const list: UserAccount[] = [];
+        snap.forEach((d) => list.push(d.data() as UserAccount));
+        callbacks.onUsers!(list);
       },
       (err) => {
         console.warn('[Firestore] Users listener notice:', err.message);
@@ -163,18 +180,16 @@ export function subscribeToRealtimeData(callbacks: {
     unsubscribers.push(unsub);
   }
 
-  // Products listener
+  // Products listener - directly reflects deletions (even if collection becomes empty)
   if (callbacks.onProducts) {
     const unsub = onSnapshot(
       collection(db, PRODUCTS_COL),
       (snap) => {
-        if (!snap.empty) {
-          const list: Product[] = [];
-          snap.forEach((d) => list.push(d.data() as Product));
-          // Sort by product id
-          list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-          callbacks.onProducts!(list);
-        }
+        const list: Product[] = [];
+        snap.forEach((d) => list.push(d.data() as Product));
+        // Sort by product id
+        list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+        callbacks.onProducts!(list);
       },
       (err) => {
         console.warn('[Firestore] Products listener notice:', err.message);
@@ -189,12 +204,10 @@ export function subscribeToRealtimeData(callbacks: {
     const unsub = onSnapshot(
       collection(db, LOGS_COL),
       (snap) => {
-        if (!snap.empty) {
-          const list: StockLog[] = [];
-          snap.forEach((d) => list.push(d.data() as StockLog));
-          list.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-          callbacks.onLogs!(list);
-        }
+        const list: StockLog[] = [];
+        snap.forEach((d) => list.push(d.data() as StockLog));
+        list.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        callbacks.onLogs!(list);
       },
       (err) => {
         console.warn('[Firestore] Logs listener notice:', err.message);
@@ -209,12 +222,10 @@ export function subscribeToRealtimeData(callbacks: {
     const unsub = onSnapshot(
       collection(db, INCOMING_COL),
       (snap) => {
-        if (!snap.empty) {
-          const list: IncomingStockRecord[] = [];
-          snap.forEach((d) => list.push(d.data() as IncomingStockRecord));
-          list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-          callbacks.onIncoming!(list);
-        }
+        const list: IncomingStockRecord[] = [];
+        snap.forEach((d) => list.push(d.data() as IncomingStockRecord));
+        list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        callbacks.onIncoming!(list);
       },
       (err) => {
         console.warn('[Firestore] Incoming listener notice:', err.message);
@@ -229,12 +240,10 @@ export function subscribeToRealtimeData(callbacks: {
     const unsub = onSnapshot(
       collection(db, OUTGOING_COL),
       (snap) => {
-        if (!snap.empty) {
-          const list: OutgoingStockRecord[] = [];
-          snap.forEach((d) => list.push(d.data() as OutgoingStockRecord));
-          list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-          callbacks.onOutgoing!(list);
-        }
+        const list: OutgoingStockRecord[] = [];
+        snap.forEach((d) => list.push(d.data() as OutgoingStockRecord));
+        list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        callbacks.onOutgoing!(list);
       },
       (err) => {
         console.warn('[Firestore] Outgoing listener notice:', err.message);
@@ -325,12 +334,38 @@ export async function firestoreBulkSaveProducts(products: Product[]): Promise<vo
   }
 }
 
+export async function firestoreClearProducts(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, PRODUCTS_COL));
+    const batch = writeBatch(db);
+    snap.forEach((d) => {
+      batch.delete(d.ref);
+    });
+    await batch.commit();
+  } catch (err) {
+    console.error('[Firestore] Error clearing products:', err);
+  }
+}
+
 export async function firestoreSaveLog(log: StockLog): Promise<void> {
   try {
     const docRef = doc(db, LOGS_COL, log.id);
     await setDoc(docRef, cleanPayload(log), { merge: true });
   } catch (err) {
     console.error('[Firestore] Error saving log:', err);
+  }
+}
+
+export async function firestoreClearLogs(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, LOGS_COL));
+    const batch = writeBatch(db);
+    snap.forEach((d) => {
+      batch.delete(d.ref);
+    });
+    await batch.commit();
+  } catch (err) {
+    console.error('[Firestore] Error clearing logs:', err);
   }
 }
 
@@ -353,6 +388,19 @@ export async function firestoreDeleteIncomingRecord(recordId: string): Promise<v
   }
 }
 
+export async function firestoreClearIncomingRecords(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, INCOMING_COL));
+    const batch = writeBatch(db);
+    snap.forEach((d) => {
+      batch.delete(d.ref);
+    });
+    await batch.commit();
+  } catch (err) {
+    console.error('[Firestore] Error clearing incoming records:', err);
+  }
+}
+
 export async function firestoreSaveOutgoingRecord(record: OutgoingStockRecord): Promise<void> {
   try {
     const docRef = doc(db, OUTGOING_COL, record.id);
@@ -369,6 +417,19 @@ export async function firestoreDeleteOutgoingRecord(recordId: string): Promise<v
     await deleteDoc(docRef);
   } catch (err) {
     console.error('[Firestore] Error deleting outgoing record:', err);
+  }
+}
+
+export async function firestoreClearOutgoingRecords(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, OUTGOING_COL));
+    const batch = writeBatch(db);
+    snap.forEach((d) => {
+      batch.delete(d.ref);
+    });
+    await batch.commit();
+  } catch (err) {
+    console.error('[Firestore] Error clearing outgoing records:', err);
   }
 }
 

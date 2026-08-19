@@ -39,11 +39,15 @@ import {
   firestoreSaveProduct,
   firestoreDeleteProduct,
   firestoreBulkSaveProducts,
+  firestoreClearProducts,
   firestoreSaveLog,
+  firestoreClearLogs,
   firestoreSaveIncomingRecord,
   firestoreDeleteIncomingRecord,
+  firestoreClearIncomingRecords,
   firestoreSaveOutgoingRecord,
   firestoreDeleteOutgoingRecord,
+  firestoreClearOutgoingRecords,
   firestoreMarkAllNotificationsRead,
   firestoreClearNotifications,
 } from './services/firestoreService';
@@ -96,7 +100,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem('stockmaster_products');
-      if (saved) return JSON.parse(saved);
+      if (saved !== null) return JSON.parse(saved);
     } catch (e) {}
     return INITIAL_PRODUCTS;
   });
@@ -104,7 +108,7 @@ export default function App() {
   const [logs, setLogs] = useState<StockLog[]>(() => {
     try {
       const saved = localStorage.getItem('stockmaster_logs');
-      if (saved) return JSON.parse(saved);
+      if (saved !== null) return JSON.parse(saved);
     } catch (e) {}
     return INITIAL_LOGS;
   });
@@ -112,7 +116,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     try {
       const saved = localStorage.getItem('stockmaster_notifications');
-      if (saved) return JSON.parse(saved);
+      if (saved !== null) return JSON.parse(saved);
     } catch (e) {}
     return INITIAL_NOTIFICATIONS;
   });
@@ -120,7 +124,7 @@ export default function App() {
   const [incomingRecords, setIncomingRecords] = useState<IncomingStockRecord[]>(() => {
     try {
       const saved = localStorage.getItem('stockmaster_incoming');
-      if (saved) return JSON.parse(saved);
+      if (saved !== null) return JSON.parse(saved);
     } catch (e) {}
     return INITIAL_INCOMING_RECORDS;
   });
@@ -128,7 +132,7 @@ export default function App() {
   const [outgoingRecords, setOutgoingRecords] = useState<OutgoingStockRecord[]>(() => {
     try {
       const saved = localStorage.getItem('stockmaster_outgoing');
-      if (saved) return JSON.parse(saved);
+      if (saved !== null) return JSON.parse(saved);
     } catch (e) {}
     return INITIAL_OUTGOING_RECORDS;
   });
@@ -146,7 +150,6 @@ export default function App() {
     const unsubscribe = subscribeToRealtimeData({
       onUsers: (cloudUsers) => {
         if (cloudUsers.length > 0) {
-          // Merge with initial users to ensure default root admin is always present
           const merged = [...cloudUsers];
           for (const initUser of INITIAL_USERS) {
             if (!merged.some((u) => u.email.toLowerCase().trim() === initUser.email.toLowerCase().trim())) {
@@ -160,12 +163,10 @@ export default function App() {
         }
       },
       onProducts: (cloudProducts) => {
-        if (cloudProducts.length > 0) {
-          setProducts(cloudProducts);
-          try {
-            localStorage.setItem('stockmaster_products', JSON.stringify(cloudProducts));
-          } catch (e) {}
-        }
+        setProducts(cloudProducts);
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(cloudProducts));
+        } catch (e) {}
       },
       onLogs: (cloudLogs) => {
         setLogs(cloudLogs);
@@ -261,7 +262,6 @@ export default function App() {
       return updated;
     });
 
-    // Cloud Persistence
     try {
       await firestoreSaveUser(newUser);
     } catch (err) {
@@ -304,7 +304,6 @@ export default function App() {
       return updated;
     });
 
-    // Cloud Persistence
     if (targetUpdated) {
       try {
         await firestoreSaveUser(targetUpdated);
@@ -326,7 +325,6 @@ export default function App() {
       return updated;
     });
 
-    // Cloud Persistence
     try {
       await firestoreDeleteUser(userId);
     } catch (err) {
@@ -360,24 +358,32 @@ export default function App() {
       createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
     };
 
-    setOutgoingRecords((prev) => [newRecord, ...prev]);
+    setOutgoingRecords((prev) => {
+      const updated = [newRecord, ...prev];
+      try {
+        localStorage.setItem('stockmaster_outgoing', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
-    // Automatically deduct inventory stock if linked to an existing product
     let updatedTargetProduct: Product | null = null;
     if (recordData.productId && recordData.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === recordData.productId) {
             const updatedP = { ...p, stock: Math.max(0, p.stock - newRecord.quantity) };
             updatedTargetProduct = updatedP;
             return updatedP;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
-    // Add audit log
     const newLog: StockLog = {
       id: `log-${Date.now()}`,
       productId: newRecord.productId,
@@ -391,9 +397,15 @@ export default function App() {
       user: currentUser?.name || 'Ops Manager',
       note: `Pengeluaran barang (${newRecord.soNumber}) ke ${newRecord.customerOrDestination}`,
     };
-    setLogs((prev) => [newLog, ...prev]);
+    
+    setLogs((prev) => {
+      const updated = [newLog, ...prev];
+      try {
+        localStorage.setItem('stockmaster_logs', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
-    // Cloud Writes
     try {
       await firestoreSaveOutgoingRecord(newRecord);
       await firestoreSaveLog(newLog);
@@ -417,8 +429,8 @@ export default function App() {
     let modifiedRecord: OutgoingStockRecord | null = null;
     let updatedTargetProduct: Product | null = null;
 
-    setOutgoingRecords((prev) =>
-      prev.map((r) => {
+    setOutgoingRecords((prev) => {
+      const updated = prev.map((r) => {
         if (r.id === recordId) {
           const mod = {
             ...r,
@@ -429,21 +441,29 @@ export default function App() {
           return mod;
         }
         return r;
-      })
-    );
+      });
+      try {
+        localStorage.setItem('stockmaster_outgoing', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     const targetProductId = updatedData.productId || existing.productId;
     if (targetProductId && targetProductId !== 'custom' && qtyDelta !== 0) {
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === targetProductId) {
             const updatedP = { ...p, stock: Math.max(0, p.stock + qtyDelta) };
             updatedTargetProduct = updatedP;
             return updatedP;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
     const newLog: StockLog = {
@@ -459,9 +479,15 @@ export default function App() {
       user: currentUser?.name || 'Ops Manager',
       note: `Koreksi data entry barang keluar #${recordId} (${existing.soNumber})`,
     };
-    setLogs((prev) => [newLog, ...prev]);
+    
+    setLogs((prev) => {
+      const updated = [newLog, ...prev];
+      try {
+        localStorage.setItem('stockmaster_logs', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
-    // Cloud Writes
     try {
       if (modifiedRecord) await firestoreSaveOutgoingRecord(modifiedRecord);
       await firestoreSaveLog(newLog);
@@ -477,23 +503,32 @@ export default function App() {
     const existing = outgoingRecords.find((r) => r.id === recordId);
     if (!existing) return;
 
-    setOutgoingRecords((prev) => prev.filter((r) => r.id !== recordId));
+    setOutgoingRecords((prev) => {
+      const updated = prev.filter((r) => r.id !== recordId);
+      try {
+        localStorage.setItem('stockmaster_outgoing', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     let updatedTargetProduct: Product | null = null;
     if (existing.productId && existing.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === existing.productId) {
             const updatedP = { ...p, stock: p.stock + existing.quantity };
             updatedTargetProduct = updatedP;
             return updatedP;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
-    // Cloud Writes
     try {
       await firestoreDeleteOutgoingRecord(recordId);
       if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
@@ -526,20 +561,30 @@ export default function App() {
       createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
     };
 
-    setIncomingRecords((prev) => [newRecord, ...prev]);
+    setIncomingRecords((prev) => {
+      const updated = [newRecord, ...prev];
+      try {
+        localStorage.setItem('stockmaster_incoming', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     let updatedTargetProduct: Product | null = null;
     if (recordData.productId && recordData.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === recordData.productId) {
             const updatedP = { ...p, stock: p.stock + newRecord.quantity };
             updatedTargetProduct = updatedP;
             return updatedP;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
     const newLog: StockLog = {
@@ -555,9 +600,15 @@ export default function App() {
       user: currentUser?.name || 'Ops Manager',
       note: `Penerimaan stok masuk (${newRecord.poNumber}) dari ${newRecord.supplier}`,
     };
-    setLogs((prev) => [newLog, ...prev]);
+    
+    setLogs((prev) => {
+      const updated = [newLog, ...prev];
+      try {
+        localStorage.setItem('stockmaster_logs', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
-    // Cloud Writes
     try {
       await firestoreSaveIncomingRecord(newRecord);
       await firestoreSaveLog(newLog);
@@ -579,8 +630,8 @@ export default function App() {
     let modifiedRecord: IncomingStockRecord | null = null;
     let updatedTargetProduct: Product | null = null;
 
-    setIncomingRecords((prev) =>
-      prev.map((r) => {
+    setIncomingRecords((prev) => {
+      const updated = prev.map((r) => {
         if (r.id === recordId) {
           const mod = {
             ...r,
@@ -591,21 +642,29 @@ export default function App() {
           return mod;
         }
         return r;
-      })
-    );
+      });
+      try {
+        localStorage.setItem('stockmaster_incoming', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     const targetProductId = updatedData.productId || existing.productId;
     if (targetProductId && targetProductId !== 'custom' && qtyDelta !== 0) {
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === targetProductId) {
             const updatedP = { ...p, stock: Math.max(0, p.stock + qtyDelta) };
             updatedTargetProduct = updatedP;
             return updatedP;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
     const newLog: StockLog = {
@@ -621,9 +680,15 @@ export default function App() {
       user: currentUser?.name || 'Ops Manager',
       note: `Koreksi data entry stok masuk #${recordId} (${existing.poNumber})`,
     };
-    setLogs((prev) => [newLog, ...prev]);
+    
+    setLogs((prev) => {
+      const updated = [newLog, ...prev];
+      try {
+        localStorage.setItem('stockmaster_logs', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
-    // Cloud Writes
     try {
       if (modifiedRecord) await firestoreSaveIncomingRecord(modifiedRecord);
       await firestoreSaveLog(newLog);
@@ -639,23 +704,32 @@ export default function App() {
     const existing = incomingRecords.find((r) => r.id === recordId);
     if (!existing) return;
 
-    setIncomingRecords((prev) => prev.filter((r) => r.id !== recordId));
+    setIncomingRecords((prev) => {
+      const updated = prev.filter((r) => r.id !== recordId);
+      try {
+        localStorage.setItem('stockmaster_incoming', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     let updatedTargetProduct: Product | null = null;
     if (existing.productId && existing.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === existing.productId) {
             const updatedP = { ...p, stock: Math.max(0, p.stock - existing.quantity) };
             updatedTargetProduct = updatedP;
             return updatedP;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
-    // Cloud Writes
     try {
       await firestoreDeleteIncomingRecord(recordId);
       if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
@@ -671,8 +745,8 @@ export default function App() {
     let updatedTargetProduct: Product | null = null;
     let newLog: StockLog | null = null;
 
-    setProducts((prevProducts) =>
-      prevProducts.map((p) => {
+    setProducts((prevProducts) => {
+      const updated = prevProducts.map((p) => {
         if (p.id !== productId) return p;
 
         if (variantId && p.variants) {
@@ -721,14 +795,23 @@ export default function App() {
           updatedTargetProduct = fullProduct;
           return fullProduct;
         }
-      })
-    );
+      });
+      try {
+        localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     if (newLog) {
-      setLogs((prev) => [newLog!, ...prev]);
+      setLogs((prev) => {
+        const updated = [newLog!, ...prev];
+        try {
+          localStorage.setItem('stockmaster_logs', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     }
 
-    // Cloud Writes
     try {
       if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
       if (newLog) await firestoreSaveLog(newLog);
@@ -748,6 +831,9 @@ export default function App() {
       lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
     }));
     setProducts(cleared);
+    try {
+      localStorage.setItem('stockmaster_products', JSON.stringify(cleared));
+    } catch (e) {}
 
     try {
       await firestoreBulkSaveProducts(cleared);
@@ -758,35 +844,50 @@ export default function App() {
     showToast('Seluruh stok produk telah dikosongkan di Cloud.');
   };
 
-  const handleClearIncomingRecords = () => {
+  const handleClearIncomingRecords = async () => {
     setIncomingRecords([]);
+    try {
+      localStorage.setItem('stockmaster_incoming', JSON.stringify([]));
+    } catch (e) {}
+    await firestoreClearIncomingRecords();
     showToast('Seluruh riwayat stok masuk telah dibersihkan.');
   };
 
-  const handleClearOutgoingRecords = () => {
+  const handleClearOutgoingRecords = async () => {
     setOutgoingRecords([]);
+    try {
+      localStorage.setItem('stockmaster_outgoing', JSON.stringify([]));
+    } catch (e) {}
+    await firestoreClearOutgoingRecords();
     showToast('Seluruh riwayat stok keluar telah dibersihkan.');
   };
 
-  const handleClearLogs = () => {
+  const handleClearLogs = async () => {
     setLogs([]);
+    try {
+      localStorage.setItem('stockmaster_logs', JSON.stringify([]));
+    } catch (e) {}
+    await firestoreClearLogs();
     showToast('Seluruh riwayat laporan & audit log telah dibersihkan.');
   };
 
   const handleSaveProduct = async (productData: Partial<Product>) => {
     if (productData.id) {
-      // Edit existing
       let modified: Product | null = null;
-      setProducts((prev) =>
-        prev.map((p) => {
+      setProducts((prev) => {
+        const updated = prev.map((p) => {
           if (p.id === productData.id) {
-            const updated = { ...p, ...productData } as Product;
-            modified = updated;
-            return updated;
+            const up = { ...p, ...productData } as Product;
+            modified = up;
+            return up;
           }
           return p;
-        })
-      );
+        });
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
 
       if (modified) {
         try {
@@ -798,7 +899,6 @@ export default function App() {
 
       showToast(`Detail produk ${productData.name} tersimpan di Cloud.`);
     } else {
-      // Add new
       const nextId = (products.length + 1).toString().padStart(3, '0');
       const newProd: Product = {
         id: nextId,
@@ -813,7 +913,13 @@ export default function App() {
         minThreshold: 10,
         lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
       };
-      setProducts((prev) => [newProd, ...prev]);
+      setProducts((prev) => {
+        const updated = [newProd, ...prev];
+        try {
+          localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
 
       try {
         await firestoreSaveProduct(newProd);
@@ -825,19 +931,23 @@ export default function App() {
     }
   };
 
-  // Delete product
+  // Delete product permanently
   const handleDeleteProduct = async (productId: string) => {
     const targetProduct = products.find((p) => p.id === productId);
-    setProducts((prev) => prev.filter((p) => p.id !== productId));
+    const updatedProducts = products.filter((p) => p.id !== productId);
+    setProducts(updatedProducts);
+    try {
+      localStorage.setItem('stockmaster_products', JSON.stringify(updatedProducts));
+    } catch (e) {}
 
     try {
       await firestoreDeleteProduct(productId);
     } catch (err) {
-      console.error('[Cloud] Error deleting product:', err);
+      console.error('[Cloud] Error deleting product from Cloud:', err);
     }
 
     if (targetProduct) {
-      showToast(`Produk "${targetProduct.name}" berhasil dihapus dari Cloud.`);
+      showToast(`Produk "${targetProduct.name}" berhasil dihapus secara permanen.`);
     }
   };
 
@@ -855,7 +965,13 @@ export default function App() {
       lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
     };
 
-    setProducts((prev) => [duplicatedProduct, ...prev]);
+    setProducts((prev) => {
+      const updated = [duplicatedProduct, ...prev];
+      try {
+        localStorage.setItem('stockmaster_products', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     try {
       await firestoreSaveProduct(duplicatedProduct);
