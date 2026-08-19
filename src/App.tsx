@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Product,
   StockLog,
@@ -52,6 +52,16 @@ import {
   firestoreClearNotifications,
 } from './services/firestoreService';
 
+// 60 Minutes Inactivity Timeout
+const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
+const SESSION_STORAGE_KEY = 'stockmaster_session_auth';
+
+interface StoredSession {
+  user: UserAccount;
+  lastActive: number;
+  remember: boolean;
+}
+
 function loadStoredUsers(): UserAccount[] {
   try {
     const saved = localStorage.getItem('stockmaster_users');
@@ -73,25 +83,57 @@ function loadStoredUsers(): UserAccount[] {
   return INITIAL_USERS;
 }
 
-export default function App() {
-  const [users, setUsers] = useState<UserAccount[]>(loadStoredUsers);
-  
-  // Persist / restore logged-in session across page reloads & tabs
-  const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
-    try {
-      const saved = localStorage.getItem('stockmaster_auth');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return INITIAL_USERS[0];
-  });
+function getInitialSession(): {
+  user: UserAccount;
+  isLoggedIn: boolean;
+  timeoutMessage: string | null;
+} {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (raw) {
+      const session: StoredSession = JSON.parse(raw);
+      const now = Date.now();
+      const elapsed = now - (session.lastActive || 0);
 
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('stockmaster_auth');
-      if (saved) return true;
-    } catch (e) {}
-    return false;
-  });
+      if (elapsed < INACTIVITY_TIMEOUT_MS) {
+        // Valid active session within 60 minutes
+        const updatedSession = { ...session, lastActive: now };
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(updatedSession));
+        return {
+          user: session.user,
+          isLoggedIn: true,
+          timeoutMessage: null,
+        };
+      } else {
+        // Expired after 60 minutes of inactivity
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return {
+          user: INITIAL_USERS[0],
+          isLoggedIn: false,
+          timeoutMessage: 'Sesi Anda telah kedaluwarsa karena tidak aktif selama lebih dari 60 menit. Silakan masuk kembali.',
+        };
+      }
+    }
+  } catch (e) {
+    console.error('Error reading stored session:', e);
+  }
+
+  // Default: Must login when opening link
+  return {
+    user: INITIAL_USERS[0],
+    isLoggedIn: false,
+    timeoutMessage: null,
+  };
+}
+
+export default function App() {
+  const initialSession = getInitialSession();
+  const [users, setUsers] = useState<UserAccount[]>(loadStoredUsers);
+  const [currentUser, setCurrentUser] = useState<UserAccount>(initialSession.user);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(initialSession.isLoggedIn);
+  const [sessionTimeoutMessage, setSessionTimeoutMessage] = useState<string | null>(
+    initialSession.timeoutMessage
+  );
 
   const [userEmail, setUserEmail] = useState(currentUser?.email || INITIAL_USERS[0].email);
   const [activeTab, setActiveTab] = useState<NavigationTab>('inventory');
@@ -138,6 +180,101 @@ export default function App() {
   });
 
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+
+  // Modal States
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isAddEditOpen, setIsAddEditOpen] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+
+  // Toast Notification Message
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2800);
+  };
+
+  // Activity timestamp ref to avoid unnecessary re-renders
+  const lastActivityRef = useRef<number>(Date.now());
+  const lastSyncRef = useRef<number>(Date.now());
+
+  // Logout handler
+  const handleLogout = useCallback((reason?: string) => {
+    setIsLoggedIn(false);
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (e) {}
+    if (reason) {
+      setSessionTimeoutMessage(reason);
+    } else {
+      setSessionTimeoutMessage(null);
+      showToast('Sesi Anda telah berakhir.');
+    }
+  }, []);
+
+  // 60-Minute Inactivity Tracker & Auto-Logout Engine
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    // Record interaction and update timestamp
+    const recordActivity = () => {
+      const now = Date.now();
+      lastActivityRef.current = now;
+
+      // Throttle localStorage writes to once every 15 seconds
+      if (now - lastSyncRef.current > 15000) {
+        lastSyncRef.current = now;
+        try {
+          const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+          if (raw) {
+            const session: StoredSession = JSON.parse(raw);
+            session.lastActive = now;
+            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+          }
+        } catch (e) {}
+      }
+    };
+
+    // User activity events
+    const activityEvents = [
+      'mousedown',
+      'mousemove',
+      'keydown',
+      'touchstart',
+      'scroll',
+      'click',
+      'wheel',
+    ];
+
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, recordActivity, { passive: true });
+    });
+
+    // Inactivity check interval (runs every 10 seconds)
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const inactiveDuration = now - lastActivityRef.current;
+
+      if (inactiveDuration >= INACTIVITY_TIMEOUT_MS) {
+        handleLogout(
+          'Sesi Anda telah berakhir secara otomatis karena tidak ada aktivitas selama 60 menit demi keamanan akun.'
+        );
+      }
+    }, 10000);
+
+    return () => {
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, recordActivity);
+      });
+      clearInterval(interval);
+    };
+  }, [isLoggedIn, handleLogout]);
 
   // Firestore Realtime Synchronization
   useEffect(() => {
@@ -204,41 +341,25 @@ export default function App() {
     };
   }, []);
 
-  // Modal States
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isAddEditOpen, setIsAddEditOpen] = useState(false);
-  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
-  const [isExportOpen, setIsExportOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
-
-  // Toast Notification Message
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 2800);
-  };
-
-  const handleLoginSuccess = (user: UserAccount) => {
+  const handleLoginSuccess = (user: UserAccount, remember: boolean) => {
+    const now = Date.now();
     setCurrentUser(user);
     setUserEmail(user.email);
     setIsLoggedIn(true);
-    try {
-      localStorage.setItem('stockmaster_auth', JSON.stringify(user));
-    } catch (e) {}
-    showToast(`Selamat datang kembali, ${user.name}!`);
-  };
+    setSessionTimeoutMessage(null);
+    lastActivityRef.current = now;
+    lastSyncRef.current = now;
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
     try {
-      localStorage.removeItem('stockmaster_auth');
+      const sessionData: StoredSession = {
+        user,
+        lastActive: now,
+        remember,
+      };
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionData));
     } catch (e) {}
-    showToast('Sesi telah berakhir.');
+
+    showToast(`Selamat datang kembali, ${user.name}!`);
   };
 
   // User Account Management handlers with Cloud Sync
@@ -290,7 +411,12 @@ export default function App() {
           if (currentUser?.id === userId) {
             setCurrentUser(mod);
             try {
-              localStorage.setItem('stockmaster_auth', JSON.stringify(mod));
+              const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+              if (raw) {
+                const s = JSON.parse(raw);
+                s.user = mod;
+                localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(s));
+              }
             } catch (e) {}
           }
           return mod;
@@ -982,9 +1108,15 @@ export default function App() {
     showToast(`Produk "${product.name}" berhasil disalin ke Cloud.`);
   };
 
-  // If user is logged out, display exact Login Screen
+  // If user is logged out, display exact Login Screen with optional session timeout banner
   if (!isLoggedIn) {
-    return <LoginScreen users={users} onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <LoginScreen
+        users={users}
+        sessionTimeoutMessage={sessionTimeoutMessage}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
   }
 
   return (
@@ -1003,7 +1135,7 @@ export default function App() {
       <Sidebar
         activeTab={activeTab}
         onSelectTab={setActiveTab}
-        onLogout={handleLogout}
+        onLogout={() => handleLogout()}
         unreadCount={notifications.filter((n) => !n.read).length}
         currentUser={currentUser}
         isRealtimeConnected={isRealtimeConnected}
@@ -1021,7 +1153,7 @@ export default function App() {
           showNotifDrawer={isNotifOpen}
           selectedWarehouse={selectedWarehouse}
           onSelectWarehouse={setSelectedWarehouse}
-          onLogout={handleLogout}
+          onLogout={() => handleLogout()}
           isRealtimeConnected={isRealtimeConnected}
         />
 
@@ -1103,7 +1235,7 @@ export default function App() {
               currentUser={currentUser}
               selectedWarehouse={selectedWarehouse}
               onSelectWarehouse={setSelectedWarehouse}
-              onLogout={handleLogout}
+              onLogout={() => handleLogout()}
               onNavigateToUsers={() => setActiveTab('users')}
               onClearStock={handleClearStock}
               onClearIncomingRecords={handleClearIncomingRecords}

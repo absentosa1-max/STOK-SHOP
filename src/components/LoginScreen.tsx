@@ -6,10 +6,15 @@ import { db } from '../lib/firebase';
 
 interface LoginScreenProps {
   users: UserAccount[];
-  onLoginSuccess: (user: UserAccount) => void;
+  sessionTimeoutMessage?: string | null;
+  onLoginSuccess: (user: UserAccount, remember: boolean) => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLoginSuccess }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({
+  users: propUsers,
+  sessionTimeoutMessage,
+  onLoginSuccess,
+}) => {
   const [cloudUsers, setCloudUsers] = useState<UserAccount[]>([]);
 
   // Listen to cloud Firestore users in real-time so any newly registered account can login from any device instantly
@@ -109,7 +114,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
       }
 
       // Successful login
-      onLoginSuccess(matchedUser);
+      onLoginSuccess(matchedUser, remember);
     }, 400);
   };
 
@@ -138,13 +143,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
           <h1 className="text-2xl font-display font-bold text-slate-900 text-center mb-1 tracking-tight">
             StockMaster System
           </h1>
-          <p className="text-xs font-medium text-slate-500 text-center mb-6">
+          <p className="text-xs font-medium text-slate-500 text-center mb-5">
             Masuk untuk Mengelola Stok & Akses Penanggung Jawab
           </p>
 
+          {/* Session Timeout Banner */}
+          {sessionTimeoutMessage && (
+            <div className="w-full p-3.5 mb-4 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-xl flex items-start gap-2.5 animate-fade-in shadow-2xs">
+              <span className="material-symbols-outlined text-[18px] text-amber-600 shrink-0 mt-0.5">
+                timer_off
+              </span>
+              <div className="leading-relaxed font-medium">{sessionTimeoutMessage}</div>
+            </div>
+          )}
+
           {/* Error Message Alert */}
           {errorMessage && (
-            <div className="w-full p-3 mb-5 bg-rose-50 border border-rose-200 text-xs text-rose-700 rounded-lg flex items-start gap-2.5 animate-fade-in">
+            <div className="w-full p-3 mb-4 bg-rose-50 border border-rose-200 text-xs text-rose-700 rounded-lg flex items-start gap-2.5 animate-fade-in">
               <span className="material-symbols-outlined text-[18px] text-rose-600 shrink-0 mt-0.5">
                 warning
               </span>
@@ -215,7 +230,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
               <label htmlFor="remember" className="text-xs text-slate-600 cursor-pointer select-none">
-                Ingat sesi masuk
+                Ingat sesi masuk (Auto-logout jika tidak aktif 60 menit)
               </label>
             </div>
 
@@ -244,9 +259,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
         {/* Card Footer */}
         <div className="bg-slate-50 p-3.5 flex items-center justify-center gap-2 border-t border-slate-100 text-[11px] text-slate-500 font-medium">
           <span className="material-symbols-outlined text-[15px] text-emerald-600">
-            cloud_sync
+            shield_lock
           </span>
-          <span>Database Cloud Online Realtime Terhubung</span>
+          <span>Keamanan Sesi: Logout Otomatis Setelah 60 Menit Inaktif</span>
         </div>
       </div>
     </div>
