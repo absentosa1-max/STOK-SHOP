@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "User account and credentials for stock and authorization management",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["primary_admin", "staff"] },
+        "roleLabel": { "type": "string" },
+        "password": { "type": "string" },
+        "isPrimaryAdmin": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "department": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role", "roleLabel", "password", "isPrimaryAdmin", "status", "department", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "sku": { "type": "string" },
+        "category": { "type": "string" },
+        "size": { "type": "string" },
+        "color": { "type": "string" },
+        "colorHex": { "type": "string" },
+        "stock": { "type": "number" },
+        "price": { "type": "number" },
+        "hasVariants": { "type": "boolean" },
+        "lastUpdated": { "type": "string" },
+        "minThreshold": { "type": "number" }
+      },
+      "required": ["id", "name", "sku", "category", "stock", "price"]
+    },
+    "StockLog": {
+      "title": "StockLog",
+      "description": "Audit trail log of all inventory changes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "sku": { "type": "string" },
+        "type": { "type": "string", "enum": ["IN", "OUT", "ADJUSTMENT"] },
+        "delta": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "timestamp": { "type": "string" },
+        "user": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["id", "productId", "productName", "sku", "type", "delta", "previousStock", "newStock", "timestamp", "user"]
+    },
+    "IncomingRecord": {
+      "title": "IncomingRecord",
+      "description": "Stock in record from supplier or purchase order",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "sku": { "type": "string" },
+        "quantity": { "type": "number" },
+        "sourceSupplier": { "type": "string" },
+        "poNumber": { "type": "string" },
+        "receiverName": { "type": "string" },
+        "date": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "productId", "productName", "sku", "quantity", "sourceSupplier", "receiverName", "date", "timestamp"]
+    },
+    "OutgoingRecord": {
+      "title": "OutgoingRecord",
+      "description": "Stock out record for order delivery or transfer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "sku": { "type": "string" },
+        "quantity": { "type": "number" },
+        "destination": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "dispatcherName": { "type": "string" },
+        "date": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "productId", "productName", "sku", "quantity", "destination", "dispatcherName", "date", "timestamp"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "System notification or alert",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "time": { "type": "string" },
+        "read": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["warning", "info", "success"] }
+      },
+      "required": ["id", "title", "message", "time", "read", "type"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Authorized staff and administrator accounts"
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Store inventory products and stock levels"
+    },
+    "/logs/{logId}": {
+      "schema": { "$ref": "#/entities/StockLog" },
+      "description": "Realtime stock audit logs"
+    },
+    "/incomingRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/IncomingRecord" },
+      "description": "Goods received records"
+    },
+    "/outgoingRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/OutgoingRecord" },
+      "description": "Goods dispatched records"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "System notifications"
+    }
+  }
+}

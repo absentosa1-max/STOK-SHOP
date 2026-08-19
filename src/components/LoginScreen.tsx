@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { UserAccount } from '../types';
 import { INITIAL_USERS } from '../data/initialUsers';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface LoginScreenProps {
   users: UserAccount[];
@@ -8,7 +10,33 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLoginSuccess }) => {
-  // Combine prop users, localStorage users, and initial fallback users
+  const [cloudUsers, setCloudUsers] = useState<UserAccount[]>([]);
+
+  // Listen to cloud Firestore users in real-time so any newly registered account can login from any device instantly
+  useEffect(() => {
+    try {
+      const unsub = onSnapshot(
+        collection(db, 'users'),
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const list: UserAccount[] = [];
+            snapshot.forEach((doc) => {
+              list.push(doc.data() as UserAccount);
+            });
+            setCloudUsers(list);
+          }
+        },
+        (err) => {
+          console.warn('[Login] Firestore snapshot error:', err);
+        }
+      );
+      return () => unsub();
+    } catch (e) {
+      console.warn('[Login] Firestore setup error:', e);
+    }
+  }, []);
+
+  // Combine prop users, cloud Firestore users, localStorage users, and initial fallback users
   const availableUsers = useMemo<UserAccount[]>(() => {
     let stored: UserAccount[] = [];
     try {
@@ -20,7 +48,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
 
     const map = new Map<string, UserAccount>();
 
-    // Priority: INITIAL_USERS -> stored users -> propUsers
+    // Priority: INITIAL_USERS -> stored users -> propUsers -> cloudUsers
     INITIAL_USERS.forEach((u) => map.set(u.email.toLowerCase().trim(), u));
     if (Array.isArray(stored)) {
       stored.forEach((u) => {
@@ -32,9 +60,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
         if (u && u.email) map.set(u.email.toLowerCase().trim(), u);
       });
     }
+    if (Array.isArray(cloudUsers)) {
+      cloudUsers.forEach((u) => {
+        if (u && u.email) map.set(u.email.toLowerCase().trim(), u);
+      });
+    }
 
     return Array.from(map.values());
-  }, [propUsers]);
+  }, [propUsers, cloudUsers]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -210,10 +243,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users: propUsers, onLo
 
         {/* Card Footer */}
         <div className="bg-slate-50 p-3.5 flex items-center justify-center gap-2 border-t border-slate-100 text-[11px] text-slate-500 font-medium">
-          <span className="material-symbols-outlined text-[15px] text-blue-600">
-            security
+          <span className="material-symbols-outlined text-[15px] text-emerald-600">
+            cloud_sync
           </span>
-          <span>Sistem Otorisasi Multi-Pengguna Terdaftar</span>
+          <span>Database Cloud Online Realtime Terhubung</span>
         </div>
       </div>
     </div>

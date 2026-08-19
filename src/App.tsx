@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Product,
   StockLog,
@@ -8,7 +8,13 @@ import {
   IncomingStockRecord,
   OutgoingStockRecord,
 } from './types';
-import { INITIAL_PRODUCTS, INITIAL_LOGS, INITIAL_NOTIFICATIONS, INITIAL_INCOMING_RECORDS, INITIAL_OUTGOING_RECORDS } from './data/mockData';
+import {
+  INITIAL_PRODUCTS,
+  INITIAL_LOGS,
+  INITIAL_NOTIFICATIONS,
+  INITIAL_INCOMING_RECORDS,
+  INITIAL_OUTGOING_RECORDS,
+} from './data/mockData';
 import { INITIAL_USERS } from './data/initialUsers';
 import { LoginScreen } from './components/LoginScreen';
 import { Sidebar } from './components/Sidebar';
@@ -25,6 +31,22 @@ import { AddEditProductModal } from './components/AddEditProductModal';
 import { ExportModal } from './components/ExportModal';
 import { StockHistoryModal } from './components/StockHistoryModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
+import {
+  bootstrapFirestoreDefaults,
+  subscribeToRealtimeData,
+  firestoreSaveUser,
+  firestoreDeleteUser,
+  firestoreSaveProduct,
+  firestoreDeleteProduct,
+  firestoreBulkSaveProducts,
+  firestoreSaveLog,
+  firestoreSaveIncomingRecord,
+  firestoreDeleteIncomingRecord,
+  firestoreSaveOutgoingRecord,
+  firestoreDeleteOutgoingRecord,
+  firestoreMarkAllNotificationsRead,
+  firestoreClearNotifications,
+} from './services/firestoreService';
 
 function loadStoredUsers(): UserAccount[] {
   try {
@@ -32,7 +54,6 @@ function loadStoredUsers(): UserAccount[] {
     if (saved) {
       const parsed: UserAccount[] = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Ensure default initial users exist while retaining all user-added accounts
         const merged = [...parsed];
         for (const initUser of INITIAL_USERS) {
           if (!merged.some((u) => u.email.toLowerCase().trim() === initUser.email.toLowerCase().trim())) {
@@ -112,399 +133,77 @@ export default function App() {
     return INITIAL_OUTGOING_RECORDS;
   });
 
-  // Realtime Sync setup via WebSocket & BroadcastChannel
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const channelRef = useRef<BroadcastChannel | null>(null);
-  const isRemoteChangeRef = useRef(false);
 
+  // Firestore Realtime Synchronization
   useEffect(() => {
-    // 1. Cross-tab BroadcastChannel (always active in any environment)
-    if (typeof BroadcastChannel !== 'undefined') {
-      const channel = new BroadcastChannel('stockmaster_realtime');
-      channelRef.current = channel;
-      channel.onmessage = (e) => {
-        if (e.data?.type === 'SYNC_ALL' && e.data.data) {
-          isRemoteChangeRef.current = true;
-          const { products: p, logs: l, notifications: n, incomingRecords: inc, outgoingRecords: out, users: u } = e.data.data;
-          if (p) { setProducts(p); try { localStorage.setItem('stockmaster_products', JSON.stringify(p)); } catch (err) {} }
-          if (l) { setLogs(l); try { localStorage.setItem('stockmaster_logs', JSON.stringify(l)); } catch (err) {} }
-          if (n) { setNotifications(n); try { localStorage.setItem('stockmaster_notifications', JSON.stringify(n)); } catch (err) {} }
-          if (inc) { setIncomingRecords(inc); try { localStorage.setItem('stockmaster_incoming', JSON.stringify(inc)); } catch (err) {} }
-          if (out) { setOutgoingRecords(out); try { localStorage.setItem('stockmaster_outgoing', JSON.stringify(out)); } catch (err) {} }
-          if (u) { setUsers(u); try { localStorage.setItem('stockmaster_users', JSON.stringify(u)); } catch (err) {} }
-        }
-      };
-    }
-
-    // 2. Full-stack WebSocket connection (when running with backend server)
-    const isStaticHosting = window.location.hostname.endsWith('github.io') || window.location.protocol === 'file:';
-    if (isStaticHosting) {
-      // On static hosting (GitHub Pages), cross-tab BroadcastChannel and localStorage are active
+    // 1. Initialize cloud defaults if database is freshly provisioned
+    bootstrapFirestoreDefaults().then(() => {
       setIsRealtimeConnected(true);
-      return;
-    }
+    });
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-
-    let socket: WebSocket | null = null;
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const connectWS = () => {
-      try {
-        socket = new WebSocket(wsUrl);
-        wsRef.current = socket;
-
-        socket.onopen = () => {
-          setIsRealtimeConnected(true);
-        };
-
-        socket.onmessage = (e) => {
-          try {
-            const msg = JSON.parse(e.data);
-            if ((msg.type === 'INIT_STATE' || msg.type === 'STATE_UPDATE') && msg.data) {
-              isRemoteChangeRef.current = true;
-              const { products: p, logs: l, notifications: n, incomingRecords: inc, outgoingRecords: out, users: u } = msg.data;
-              if (p) setProducts(p);
-              if (l) setLogs(l);
-              if (n) setNotifications(n);
-              if (inc) setIncomingRecords(inc);
-              if (out) setOutgoingRecords(out);
-              if (u) setUsers(u);
+    // 2. Setup active Firestore real-time subscriptions
+    const unsubscribe = subscribeToRealtimeData({
+      onUsers: (cloudUsers) => {
+        if (cloudUsers.length > 0) {
+          // Merge with initial users to ensure default root admin is always present
+          const merged = [...cloudUsers];
+          for (const initUser of INITIAL_USERS) {
+            if (!merged.some((u) => u.email.toLowerCase().trim() === initUser.email.toLowerCase().trim())) {
+              merged.push(initUser);
             }
-          } catch (err) {
-            console.error('[Realtime] Message parse error:', err);
           }
-        };
+          setUsers(merged);
+          try {
+            localStorage.setItem('stockmaster_users', JSON.stringify(merged));
+          } catch (e) {}
+        }
+      },
+      onProducts: (cloudProducts) => {
+        if (cloudProducts.length > 0) {
+          setProducts(cloudProducts);
+          try {
+            localStorage.setItem('stockmaster_products', JSON.stringify(cloudProducts));
+          } catch (e) {}
+        }
+      },
+      onLogs: (cloudLogs) => {
+        setLogs(cloudLogs);
+        try {
+          localStorage.setItem('stockmaster_logs', JSON.stringify(cloudLogs));
+        } catch (e) {}
+      },
+      onIncoming: (cloudIncoming) => {
+        setIncomingRecords(cloudIncoming);
+        try {
+          localStorage.setItem('stockmaster_incoming', JSON.stringify(cloudIncoming));
+        } catch (e) {}
+      },
+      onOutgoing: (cloudOutgoing) => {
+        setOutgoingRecords(cloudOutgoing);
+        try {
+          localStorage.setItem('stockmaster_outgoing', JSON.stringify(cloudOutgoing));
+        } catch (e) {}
+      },
+      onNotifications: (cloudNotifs) => {
+        setNotifications(cloudNotifs);
+        try {
+          localStorage.setItem('stockmaster_notifications', JSON.stringify(cloudNotifs));
+        } catch (e) {}
+      },
+      onError: (err) => {
+        console.warn('[Realtime Sync] Notice:', err);
+      },
+    });
 
-        socket.onclose = () => {
-          setIsRealtimeConnected(false);
-          reconnectTimeout = setTimeout(connectWS, 5000);
-        };
-
-        socket.onerror = () => {
-          setIsRealtimeConnected(false);
-        };
-      } catch (err) {
-        setIsRealtimeConnected(false);
-      }
-    };
-
-    connectWS();
+    setIsRealtimeConnected(true);
 
     return () => {
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (socket) socket.close();
-      if (channelRef.current) channelRef.current.close();
+      unsubscribe();
     };
   }, []);
 
-  // Sync state changes to server, localStorage, and other tabs whenever local state updates
-  useEffect(() => {
-    // Persist to localStorage for static hosting / offline resilience
-    try {
-      localStorage.setItem('stockmaster_products', JSON.stringify(products));
-      localStorage.setItem('stockmaster_logs', JSON.stringify(logs));
-      localStorage.setItem('stockmaster_notifications', JSON.stringify(notifications));
-      localStorage.setItem('stockmaster_incoming', JSON.stringify(incomingRecords));
-      localStorage.setItem('stockmaster_outgoing', JSON.stringify(outgoingRecords));
-      localStorage.setItem('stockmaster_users', JSON.stringify(users));
-    } catch (err) {}
-
-    if (isRemoteChangeRef.current) {
-      isRemoteChangeRef.current = false;
-      return;
-    }
-
-    const payload = {
-      products,
-      logs,
-      notifications,
-      incomingRecords,
-      outgoingRecords,
-      users,
-    };
-
-    // BroadcastChannel
-    if (channelRef.current) {
-      channelRef.current.postMessage({
-        type: 'SYNC_ALL',
-        data: payload,
-      });
-    }
-
-    // WebSocket
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'UPDATE_FULL_STATE',
-          data: payload,
-        })
-      );
-    }
-  }, [products, logs, notifications, incomingRecords, outgoingRecords, users]);
-
-  // Handlers for Outgoing Stock Records
-  const handleAddOutgoingRecord = (recordData: Partial<OutgoingStockRecord>) => {
-    const newRecordId = `out-${Math.floor(100 + Math.random() * 900)}`;
-    const newRecord: OutgoingStockRecord = {
-      id: newRecordId,
-      dateOut: recordData.dateOut || new Date().toISOString().slice(0, 10),
-      productId: recordData.productId || 'custom',
-      productName: recordData.productName || 'Produk Keluar',
-      sku: recordData.sku || `SKU-${Date.now().toString().slice(-4)}`,
-      category: recordData.category || 'Umum',
-      size: recordData.size || '—',
-      color: recordData.color || '—',
-      colorHex: recordData.colorHex,
-      quantity: recordData.quantity || 1,
-      unitPrice: recordData.unitPrice || 0,
-      customerOrDestination: recordData.customerOrDestination || 'Pelanggan Umum',
-      soNumber: recordData.soNumber || `SO-${Date.now().toString().slice(-6)}`,
-      shippingCarrier: recordData.shippingCarrier || 'Internal',
-      reason: recordData.reason || 'Penjualan',
-      note: recordData.note,
-      processedBy: currentUser?.name || 'Ops Manager',
-      createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    };
-
-    setOutgoingRecords((prev) => [newRecord, ...prev]);
-
-    // Automatically deduct inventory stock if linked to an existing product
-    if (recordData.productId && recordData.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id === recordData.productId) {
-            return { ...p, stock: Math.max(0, p.stock - newRecord.quantity) };
-          }
-          return p;
-        })
-      );
-    }
-
-    // Add audit log
-    const newLog: StockLog = {
-      id: `log-${Date.now()}`,
-      productId: newRecord.productId,
-      productName: `${newRecord.productName} (${newRecord.size}/${newRecord.color})`,
-      sku: newRecord.sku,
-      type: 'OUT',
-      delta: -newRecord.quantity,
-      previousStock: 0,
-      newStock: 0,
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      user: currentUser?.name || 'Ops Manager',
-      note: `Pengeluaran barang (${newRecord.soNumber}) ke ${newRecord.customerOrDestination}`,
-    };
-    setLogs((prev) => [newLog, ...prev]);
-
-    showToast(`Barang keluar ${newRecord.productName} (-${newRecord.quantity} unit) berhasil dicatat!`);
-  };
-
-  const handleEditOutgoingRecord = (recordId: string, updatedData: Partial<OutgoingStockRecord>) => {
-    const existing = outgoingRecords.find((r) => r.id === recordId);
-    if (!existing) return;
-
-    const oldQty = existing.quantity;
-    const newQty = updatedData.quantity !== undefined ? updatedData.quantity : oldQty;
-    // Difference in outgoing quantity: if newQty > oldQty, additional inventory is removed (delta negative)
-    const qtyDelta = oldQty - newQty;
-
-    setOutgoingRecords((prev) =>
-      prev.map((r) =>
-        r.id === recordId
-          ? {
-              ...r,
-              ...updatedData,
-              updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-            }
-          : r
-      )
-    );
-
-    // Adjust inventory if linked to a product
-    const targetProductId = updatedData.productId || existing.productId;
-    if (targetProductId && targetProductId !== 'custom' && qtyDelta !== 0) {
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id === targetProductId) {
-            return { ...p, stock: Math.max(0, p.stock + qtyDelta) };
-          }
-          return p;
-        })
-      );
-    }
-
-    // Audit log
-    const newLog: StockLog = {
-      id: `log-${Date.now()}`,
-      productId: targetProductId,
-      productName: updatedData.productName || existing.productName,
-      sku: updatedData.sku || existing.sku,
-      type: 'ADJUSTMENT',
-      delta: qtyDelta,
-      previousStock: oldQty,
-      newStock: newQty,
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      user: currentUser?.name || 'Ops Manager',
-      note: `Koreksi data entry barang keluar #${recordId} (${existing.soNumber})`,
-    };
-    setLogs((prev) => [newLog, ...prev]);
-
-    showToast(`Record barang keluar #${recordId} berhasil diperbarui.`);
-  };
-
-  const handleDeleteOutgoingRecord = (recordId: string) => {
-    const existing = outgoingRecords.find((r) => r.id === recordId);
-    if (!existing) return;
-
-    setOutgoingRecords((prev) => prev.filter((r) => r.id !== recordId));
-
-    // Restore inventory stock if linked
-    if (existing.productId && existing.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id === existing.productId) {
-            return { ...p, stock: p.stock + existing.quantity };
-          }
-          return p;
-        })
-      );
-    }
-
-    showToast(`Record barang keluar #${recordId} telah dihapus.`);
-  };
-
-  // Handlers for Incoming Stock Records
-  const handleAddIncomingRecord = (recordData: Partial<IncomingStockRecord>) => {
-    const newRecordId = `in-${Math.floor(100 + Math.random() * 900)}`;
-    const newRecord: IncomingStockRecord = {
-      id: newRecordId,
-      dateAdded: recordData.dateAdded || new Date().toISOString().slice(0, 10),
-      productId: recordData.productId || 'custom',
-      productName: recordData.productName || 'Produk Masuk',
-      sku: recordData.sku || `SKU-${Date.now().toString().slice(-4)}`,
-      category: recordData.category || 'Umum',
-      size: recordData.size || '—',
-      color: recordData.color || '—',
-      colorHex: recordData.colorHex,
-      quantity: recordData.quantity || 1,
-      unitPrice: recordData.unitPrice || 0,
-      supplier: recordData.supplier || 'Pemasok Umum',
-      poNumber: recordData.poNumber || `PO-${Date.now().toString().slice(-6)}`,
-      note: recordData.note,
-      receivedBy: currentUser?.name || 'Ops Manager',
-      createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    };
-
-    setIncomingRecords((prev) => [newRecord, ...prev]);
-
-    // Automatically update inventory stock if linked to an existing product
-    if (recordData.productId && recordData.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id === recordData.productId) {
-            return { ...p, stock: p.stock + newRecord.quantity };
-          }
-          return p;
-        })
-      );
-    }
-
-    // Add audit log
-    const newLog: StockLog = {
-      id: `log-${Date.now()}`,
-      productId: newRecord.productId,
-      productName: `${newRecord.productName} (${newRecord.size}/${newRecord.color})`,
-      sku: newRecord.sku,
-      type: 'IN',
-      delta: newRecord.quantity,
-      previousStock: 0,
-      newStock: newRecord.quantity,
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      user: currentUser?.name || 'Ops Manager',
-      note: `Penerimaan stok masuk (${newRecord.poNumber}) dari ${newRecord.supplier}`,
-    };
-    setLogs((prev) => [newLog, ...prev]);
-
-    showToast(`Stok masuk ${newRecord.productName} (+${newRecord.quantity} unit) berhasil dicatat!`);
-  };
-
-  const handleEditIncomingRecord = (recordId: string, updatedData: Partial<IncomingStockRecord>) => {
-    const existing = incomingRecords.find((r) => r.id === recordId);
-    if (!existing) return;
-
-    const oldQty = existing.quantity;
-    const newQty = updatedData.quantity !== undefined ? updatedData.quantity : oldQty;
-    const qtyDelta = newQty - oldQty;
-
-    setIncomingRecords((prev) =>
-      prev.map((r) =>
-        r.id === recordId
-          ? {
-              ...r,
-              ...updatedData,
-              updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-            }
-          : r
-      )
-    );
-
-    // Adjust inventory if linked to a product
-    const targetProductId = updatedData.productId || existing.productId;
-    if (targetProductId && targetProductId !== 'custom' && qtyDelta !== 0) {
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id === targetProductId) {
-            return { ...p, stock: Math.max(0, p.stock + qtyDelta) };
-          }
-          return p;
-        })
-      );
-    }
-
-    // Audit log
-    const newLog: StockLog = {
-      id: `log-${Date.now()}`,
-      productId: targetProductId,
-      productName: updatedData.productName || existing.productName,
-      sku: updatedData.sku || existing.sku,
-      type: qtyDelta >= 0 ? 'IN' : 'ADJUSTMENT',
-      delta: qtyDelta,
-      previousStock: oldQty,
-      newStock: newQty,
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      user: currentUser?.name || 'Ops Manager',
-      note: `Koreksi data entry stok masuk #${recordId} (${existing.poNumber})`,
-    };
-    setLogs((prev) => [newLog, ...prev]);
-
-    showToast(`Record stok masuk #${recordId} berhasil diperbarui.`);
-  };
-
-  const handleDeleteIncomingRecord = (recordId: string) => {
-    const existing = incomingRecords.find((r) => r.id === recordId);
-    if (!existing) return;
-
-    setIncomingRecords((prev) => prev.filter((r) => r.id !== recordId));
-
-    // Revert inventory stock if linked
-    if (existing.productId && existing.productId !== 'custom') {
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id === existing.productId) {
-            return { ...p, stock: Math.max(0, p.stock - existing.quantity) };
-          }
-          return p;
-        })
-      );
-    }
-
-    showToast(`Record stok masuk #${recordId} telah dihapus.`);
-  };
-
-  // Modals state
+  // Modal States
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
@@ -513,7 +212,7 @@ export default function App() {
   const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
 
-  // Toast feedback
+  // Toast Notification Message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -541,8 +240,8 @@ export default function App() {
     showToast('Sesi telah berakhir.');
   };
 
-  // User Account Management handlers
-  const handleAddUser = (userData: Omit<UserAccount, 'id' | 'createdAt'>) => {
+  // User Account Management handlers with Cloud Sync
+  const handleAddUser = async (userData: Omit<UserAccount, 'id' | 'createdAt'>) => {
     const newUser: UserAccount = {
       ...userData,
       name: userData.name.trim(),
@@ -562,14 +261,23 @@ export default function App() {
       return updated;
     });
 
-    showToast(`Akun ${newUser.name} (${newUser.roleLabel}) berhasil ditambahkan!`);
+    // Cloud Persistence
+    try {
+      await firestoreSaveUser(newUser);
+    } catch (err) {
+      console.error('[Cloud] Error saving user:', err);
+    }
+
+    showToast(`Akun ${newUser.name} (${newUser.roleLabel}) tersimpan di Cloud Database!`);
   };
 
-  const handleUpdateUser = (userId: string, updatedData: Partial<UserAccount>) => {
+  const handleUpdateUser = async (userId: string, updatedData: Partial<UserAccount>) => {
+    let targetUpdated: UserAccount | null = null;
+
     setUsers((prev) => {
       const updated = prev.map((u) => {
         if (u.id === userId) {
-          const mod = {
+          const mod: UserAccount = {
             ...u,
             ...updatedData,
             name: updatedData.name !== undefined ? updatedData.name.trim() : u.name,
@@ -578,6 +286,7 @@ export default function App() {
             roleLabel: updatedData.roleLabel !== undefined ? updatedData.roleLabel.trim() : u.roleLabel,
             department: updatedData.department !== undefined ? updatedData.department.trim() : u.department,
           };
+          targetUpdated = mod;
           if (currentUser?.id === userId) {
             setCurrentUser(mod);
             try {
@@ -595,10 +304,19 @@ export default function App() {
       return updated;
     });
 
-    showToast(`Data akun pengguna telah diperbarui.`);
+    // Cloud Persistence
+    if (targetUpdated) {
+      try {
+        await firestoreSaveUser(targetUpdated);
+      } catch (err) {
+        console.error('[Cloud] Error updating user:', err);
+      }
+    }
+
+    showToast(`Data akun pengguna telah diperbarui di Cloud.`);
   };
 
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     const targetUser = users.find((u) => u.id === userId);
     setUsers((prev) => {
       const updated = prev.filter((u) => u.id !== userId);
@@ -607,11 +325,352 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
-    showToast(`Akun ${targetUser?.name || ''} telah dihapus.`);
+
+    // Cloud Persistence
+    try {
+      await firestoreDeleteUser(userId);
+    } catch (err) {
+      console.error('[Cloud] Error deleting user:', err);
+    }
+
+    showToast(`Akun ${targetUser?.name || ''} telah dihapus dari Cloud.`);
+  };
+
+  // Handlers for Outgoing Stock Records
+  const handleAddOutgoingRecord = async (recordData: Partial<OutgoingStockRecord>) => {
+    const newRecordId = `out-${Math.floor(100 + Math.random() * 900)}`;
+    const newRecord: OutgoingStockRecord = {
+      id: newRecordId,
+      dateOut: recordData.dateOut || new Date().toISOString().slice(0, 10),
+      productId: recordData.productId || 'custom',
+      productName: recordData.productName || 'Produk Keluar',
+      sku: recordData.sku || `SKU-${Date.now().toString().slice(-4)}`,
+      category: recordData.category || 'Umum',
+      size: recordData.size || '—',
+      color: recordData.color || '—',
+      colorHex: recordData.colorHex,
+      quantity: recordData.quantity || 1,
+      unitPrice: recordData.unitPrice || 0,
+      customerOrDestination: recordData.customerOrDestination || 'Pelanggan Umum',
+      soNumber: recordData.soNumber || `SO-${Date.now().toString().slice(-6)}`,
+      shippingCarrier: recordData.shippingCarrier || 'Internal',
+      reason: recordData.reason || 'Penjualan',
+      note: recordData.note,
+      processedBy: currentUser?.name || 'Ops Manager',
+      createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    };
+
+    setOutgoingRecords((prev) => [newRecord, ...prev]);
+
+    // Automatically deduct inventory stock if linked to an existing product
+    let updatedTargetProduct: Product | null = null;
+    if (recordData.productId && recordData.productId !== 'custom') {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === recordData.productId) {
+            const updatedP = { ...p, stock: Math.max(0, p.stock - newRecord.quantity) };
+            updatedTargetProduct = updatedP;
+            return updatedP;
+          }
+          return p;
+        })
+      );
+    }
+
+    // Add audit log
+    const newLog: StockLog = {
+      id: `log-${Date.now()}`,
+      productId: newRecord.productId,
+      productName: `${newRecord.productName} (${newRecord.size}/${newRecord.color})`,
+      sku: newRecord.sku,
+      type: 'OUT',
+      delta: -newRecord.quantity,
+      previousStock: 0,
+      newStock: 0,
+      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      user: currentUser?.name || 'Ops Manager',
+      note: `Pengeluaran barang (${newRecord.soNumber}) ke ${newRecord.customerOrDestination}`,
+    };
+    setLogs((prev) => [newLog, ...prev]);
+
+    // Cloud Writes
+    try {
+      await firestoreSaveOutgoingRecord(newRecord);
+      await firestoreSaveLog(newLog);
+      if (updatedTargetProduct) {
+        await firestoreSaveProduct(updatedTargetProduct);
+      }
+    } catch (err) {
+      console.error('[Cloud] Error saving outgoing record:', err);
+    }
+
+    showToast(`Barang keluar ${newRecord.productName} (-${newRecord.quantity} unit) tersimpan di Cloud!`);
+  };
+
+  const handleEditOutgoingRecord = async (recordId: string, updatedData: Partial<OutgoingStockRecord>) => {
+    const existing = outgoingRecords.find((r) => r.id === recordId);
+    if (!existing) return;
+
+    const oldQty = existing.quantity;
+    const newQty = updatedData.quantity !== undefined ? updatedData.quantity : oldQty;
+    const qtyDelta = oldQty - newQty;
+    let modifiedRecord: OutgoingStockRecord | null = null;
+    let updatedTargetProduct: Product | null = null;
+
+    setOutgoingRecords((prev) =>
+      prev.map((r) => {
+        if (r.id === recordId) {
+          const mod = {
+            ...r,
+            ...updatedData,
+            updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          };
+          modifiedRecord = mod;
+          return mod;
+        }
+        return r;
+      })
+    );
+
+    const targetProductId = updatedData.productId || existing.productId;
+    if (targetProductId && targetProductId !== 'custom' && qtyDelta !== 0) {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === targetProductId) {
+            const updatedP = { ...p, stock: Math.max(0, p.stock + qtyDelta) };
+            updatedTargetProduct = updatedP;
+            return updatedP;
+          }
+          return p;
+        })
+      );
+    }
+
+    const newLog: StockLog = {
+      id: `log-${Date.now()}`,
+      productId: targetProductId,
+      productName: updatedData.productName || existing.productName,
+      sku: updatedData.sku || existing.sku,
+      type: 'ADJUSTMENT',
+      delta: qtyDelta,
+      previousStock: oldQty,
+      newStock: newQty,
+      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      user: currentUser?.name || 'Ops Manager',
+      note: `Koreksi data entry barang keluar #${recordId} (${existing.soNumber})`,
+    };
+    setLogs((prev) => [newLog, ...prev]);
+
+    // Cloud Writes
+    try {
+      if (modifiedRecord) await firestoreSaveOutgoingRecord(modifiedRecord);
+      await firestoreSaveLog(newLog);
+      if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
+    } catch (err) {
+      console.error('[Cloud] Error updating outgoing record:', err);
+    }
+
+    showToast(`Record barang keluar #${recordId} berhasil diperbarui di Cloud.`);
+  };
+
+  const handleDeleteOutgoingRecord = async (recordId: string) => {
+    const existing = outgoingRecords.find((r) => r.id === recordId);
+    if (!existing) return;
+
+    setOutgoingRecords((prev) => prev.filter((r) => r.id !== recordId));
+
+    let updatedTargetProduct: Product | null = null;
+    if (existing.productId && existing.productId !== 'custom') {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === existing.productId) {
+            const updatedP = { ...p, stock: p.stock + existing.quantity };
+            updatedTargetProduct = updatedP;
+            return updatedP;
+          }
+          return p;
+        })
+      );
+    }
+
+    // Cloud Writes
+    try {
+      await firestoreDeleteOutgoingRecord(recordId);
+      if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
+    } catch (err) {
+      console.error('[Cloud] Error deleting outgoing record:', err);
+    }
+
+    showToast(`Record barang keluar #${recordId} telah dihapus dari Cloud.`);
+  };
+
+  // Handlers for Incoming Stock Records
+  const handleAddIncomingRecord = async (recordData: Partial<IncomingStockRecord>) => {
+    const newRecordId = `in-${Math.floor(100 + Math.random() * 900)}`;
+    const newRecord: IncomingStockRecord = {
+      id: newRecordId,
+      dateAdded: recordData.dateAdded || new Date().toISOString().slice(0, 10),
+      productId: recordData.productId || 'custom',
+      productName: recordData.productName || 'Produk Masuk',
+      sku: recordData.sku || `SKU-${Date.now().toString().slice(-4)}`,
+      category: recordData.category || 'Umum',
+      size: recordData.size || '—',
+      color: recordData.color || '—',
+      colorHex: recordData.colorHex,
+      quantity: recordData.quantity || 1,
+      unitPrice: recordData.unitPrice || 0,
+      supplier: recordData.supplier || 'Pemasok Umum',
+      poNumber: recordData.poNumber || `PO-${Date.now().toString().slice(-6)}`,
+      note: recordData.note,
+      receivedBy: currentUser?.name || 'Ops Manager',
+      createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    };
+
+    setIncomingRecords((prev) => [newRecord, ...prev]);
+
+    let updatedTargetProduct: Product | null = null;
+    if (recordData.productId && recordData.productId !== 'custom') {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === recordData.productId) {
+            const updatedP = { ...p, stock: p.stock + newRecord.quantity };
+            updatedTargetProduct = updatedP;
+            return updatedP;
+          }
+          return p;
+        })
+      );
+    }
+
+    const newLog: StockLog = {
+      id: `log-${Date.now()}`,
+      productId: newRecord.productId,
+      productName: `${newRecord.productName} (${newRecord.size}/${newRecord.color})`,
+      sku: newRecord.sku,
+      type: 'IN',
+      delta: newRecord.quantity,
+      previousStock: 0,
+      newStock: newRecord.quantity,
+      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      user: currentUser?.name || 'Ops Manager',
+      note: `Penerimaan stok masuk (${newRecord.poNumber}) dari ${newRecord.supplier}`,
+    };
+    setLogs((prev) => [newLog, ...prev]);
+
+    // Cloud Writes
+    try {
+      await firestoreSaveIncomingRecord(newRecord);
+      await firestoreSaveLog(newLog);
+      if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
+    } catch (err) {
+      console.error('[Cloud] Error saving incoming record:', err);
+    }
+
+    showToast(`Stok masuk ${newRecord.productName} (+${newRecord.quantity} unit) tersimpan di Cloud!`);
+  };
+
+  const handleEditIncomingRecord = async (recordId: string, updatedData: Partial<IncomingStockRecord>) => {
+    const existing = incomingRecords.find((r) => r.id === recordId);
+    if (!existing) return;
+
+    const oldQty = existing.quantity;
+    const newQty = updatedData.quantity !== undefined ? updatedData.quantity : oldQty;
+    const qtyDelta = newQty - oldQty;
+    let modifiedRecord: IncomingStockRecord | null = null;
+    let updatedTargetProduct: Product | null = null;
+
+    setIncomingRecords((prev) =>
+      prev.map((r) => {
+        if (r.id === recordId) {
+          const mod = {
+            ...r,
+            ...updatedData,
+            updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+          };
+          modifiedRecord = mod;
+          return mod;
+        }
+        return r;
+      })
+    );
+
+    const targetProductId = updatedData.productId || existing.productId;
+    if (targetProductId && targetProductId !== 'custom' && qtyDelta !== 0) {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === targetProductId) {
+            const updatedP = { ...p, stock: Math.max(0, p.stock + qtyDelta) };
+            updatedTargetProduct = updatedP;
+            return updatedP;
+          }
+          return p;
+        })
+      );
+    }
+
+    const newLog: StockLog = {
+      id: `log-${Date.now()}`,
+      productId: targetProductId,
+      productName: updatedData.productName || existing.productName,
+      sku: updatedData.sku || existing.sku,
+      type: 'ADJUSTMENT',
+      delta: qtyDelta,
+      previousStock: oldQty,
+      newStock: newQty,
+      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      user: currentUser?.name || 'Ops Manager',
+      note: `Koreksi data entry stok masuk #${recordId} (${existing.poNumber})`,
+    };
+    setLogs((prev) => [newLog, ...prev]);
+
+    // Cloud Writes
+    try {
+      if (modifiedRecord) await firestoreSaveIncomingRecord(modifiedRecord);
+      await firestoreSaveLog(newLog);
+      if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
+    } catch (err) {
+      console.error('[Cloud] Error updating incoming record:', err);
+    }
+
+    showToast(`Record stok masuk #${recordId} berhasil diperbarui di Cloud.`);
+  };
+
+  const handleDeleteIncomingRecord = async (recordId: string) => {
+    const existing = incomingRecords.find((r) => r.id === recordId);
+    if (!existing) return;
+
+    setIncomingRecords((prev) => prev.filter((r) => r.id !== recordId));
+
+    let updatedTargetProduct: Product | null = null;
+    if (existing.productId && existing.productId !== 'custom') {
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id === existing.productId) {
+            const updatedP = { ...p, stock: Math.max(0, p.stock - existing.quantity) };
+            updatedTargetProduct = updatedP;
+            return updatedP;
+          }
+          return p;
+        })
+      );
+    }
+
+    // Cloud Writes
+    try {
+      await firestoreDeleteIncomingRecord(recordId);
+      if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
+    } catch (err) {
+      console.error('[Cloud] Error deleting incoming record:', err);
+    }
+
+    showToast(`Record stok masuk #${recordId} telah dihapus dari Cloud.`);
   };
 
   // Live stock adjustment +/- handler
-  const handleUpdateStock = (productId: string, variantId: string | null, delta: number) => {
+  const handleUpdateStock = async (productId: string, variantId: string | null, delta: number) => {
+    let updatedTargetProduct: Product | null = null;
+    let newLog: StockLog | null = null;
+
     setProducts((prevProducts) =>
       prevProducts.map((p) => {
         if (p.id !== productId) return p;
@@ -624,9 +683,8 @@ export default function App() {
           });
           const totalMainStock = updatedVariants.reduce((sum, v) => sum + v.stock, 0);
 
-          // Audit log record
           const targetVariant = p.variants.find((v) => v.id === variantId);
-          const newLog: StockLog = {
+          newLog = {
             id: `log-${Date.now()}`,
             productId: p.id,
             productName: `${p.name} (${targetVariant?.size}/${targetVariant?.color})`,
@@ -636,23 +694,16 @@ export default function App() {
             previousStock: targetVariant?.stock || 0,
             newStock: Math.max(0, (targetVariant?.stock || 0) + delta),
             timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-            user: 'Ops Manager',
+            user: currentUser?.name || 'Ops Manager',
             note: delta > 0 ? 'Penyesuaian stok masuk cepat (+)' : 'Penyesuaian stok keluar cepat (-)',
           };
-          setLogs((prev) => [newLog, ...prev]);
 
-          showToast(
-            `Stok ${p.name} (${targetVariant?.size}) diperbarui menjadi ${Math.max(
-              0,
-              (targetVariant?.stock || 0) + delta
-            )}`
-          );
-
-          return { ...p, stock: totalMainStock, variants: updatedVariants };
+          const fullProduct: Product = { ...p, stock: totalMainStock, variants: updatedVariants };
+          updatedTargetProduct = fullProduct;
+          return fullProduct;
         } else {
           const newStock = Math.max(0, p.stock + delta);
-
-          const newLog: StockLog = {
+          newLog = {
             id: `log-${Date.now()}`,
             productId: p.id,
             productName: p.name,
@@ -662,54 +713,90 @@ export default function App() {
             previousStock: p.stock,
             newStock,
             timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-            user: 'Ops Manager',
+            user: currentUser?.name || 'Ops Manager',
             note: delta > 0 ? 'Penyesuaian manual (+)' : 'Penyesuaian manual (-)',
           };
-          setLogs((prev) => [newLog, ...prev]);
 
-          showToast(`Stok ${p.name} diperbarui menjadi ${newStock}`);
-
-          return { ...p, stock: newStock };
+          const fullProduct: Product = { ...p, stock: newStock };
+          updatedTargetProduct = fullProduct;
+          return fullProduct;
         }
       })
     );
+
+    if (newLog) {
+      setLogs((prev) => [newLog!, ...prev]);
+    }
+
+    // Cloud Writes
+    try {
+      if (updatedTargetProduct) await firestoreSaveProduct(updatedTargetProduct);
+      if (newLog) await firestoreSaveLog(newLog);
+    } catch (err) {
+      console.error('[Cloud] Error updating stock:', err);
+    }
+
+    showToast(`Stok ${updatedTargetProduct?.name || 'produk'} diperbarui di Cloud.`);
   };
 
   // Add or edit product
-  const handleClearStock = () => {
-    setProducts((prev) =>
-      prev.map((p) => ({
-        ...p,
-        stock: 0,
-        variants: p.variants?.map((v) => ({ ...v, stock: 0 })),
-        lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      }))
-    );
-    showToast('Seluruh stok produk telah dikosongkan menjadi 0.');
+  const handleClearStock = async () => {
+    const cleared = products.map((p) => ({
+      ...p,
+      stock: 0,
+      variants: p.variants?.map((v) => ({ ...v, stock: 0 })),
+      lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    }));
+    setProducts(cleared);
+
+    try {
+      await firestoreBulkSaveProducts(cleared);
+    } catch (err) {
+      console.error('[Cloud] Error clearing stock:', err);
+    }
+
+    showToast('Seluruh stok produk telah dikosongkan di Cloud.');
   };
 
   const handleClearIncomingRecords = () => {
     setIncomingRecords([]);
-    showToast('Seluruh riwayat stok masuk telah dihapus.');
+    showToast('Seluruh riwayat stok masuk telah dibersihkan.');
   };
 
   const handleClearOutgoingRecords = () => {
     setOutgoingRecords([]);
-    showToast('Seluruh riwayat stok keluar telah dihapus.');
+    showToast('Seluruh riwayat stok keluar telah dibersihkan.');
   };
 
   const handleClearLogs = () => {
     setLogs([]);
-    showToast('Seluruh riwayat laporan & audit log telah dihapus.');
+    showToast('Seluruh riwayat laporan & audit log telah dibersihkan.');
   };
 
-  const handleSaveProduct = (productData: Partial<Product>) => {
+  const handleSaveProduct = async (productData: Partial<Product>) => {
     if (productData.id) {
       // Edit existing
+      let modified: Product | null = null;
       setProducts((prev) =>
-        prev.map((p) => (p.id === productData.id ? ({ ...p, ...productData } as Product) : p))
+        prev.map((p) => {
+          if (p.id === productData.id) {
+            const updated = { ...p, ...productData } as Product;
+            modified = updated;
+            return updated;
+          }
+          return p;
+        })
       );
-      showToast(`Detail produk ${productData.name} berhasil diperbarui.`);
+
+      if (modified) {
+        try {
+          await firestoreSaveProduct(modified);
+        } catch (err) {
+          console.error('[Cloud] Error saving product:', err);
+        }
+      }
+
+      showToast(`Detail produk ${productData.name} tersimpan di Cloud.`);
     } else {
       // Add new
       const nextId = (products.length + 1).toString().padStart(3, '0');
@@ -727,21 +814,35 @@ export default function App() {
         lastUpdated: new Date().toISOString().slice(0, 16).replace('T', ' '),
       };
       setProducts((prev) => [newProd, ...prev]);
-      showToast(`Produk baru ${newProd.name} berhasil ditambahkan.`);
+
+      try {
+        await firestoreSaveProduct(newProd);
+      } catch (err) {
+        console.error('[Cloud] Error creating product:', err);
+      }
+
+      showToast(`Produk baru ${newProd.name} tersimpan di Cloud.`);
     }
   };
 
   // Delete product
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
     const targetProduct = products.find((p) => p.id === productId);
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+
+    try {
+      await firestoreDeleteProduct(productId);
+    } catch (err) {
+      console.error('[Cloud] Error deleting product:', err);
+    }
+
     if (targetProduct) {
-      showToast(`Produk "${targetProduct.name}" berhasil dihapus.`);
+      showToast(`Produk "${targetProduct.name}" berhasil dihapus dari Cloud.`);
     }
   };
 
   // Copy / Duplicate product
-  const handleCopyProduct = (product: Product) => {
+  const handleCopyProduct = async (product: Product) => {
     const nextId = (Math.max(...products.map((p) => parseInt(p.id) || 0), 0) + 1)
       .toString()
       .padStart(3, '0');
@@ -755,7 +856,14 @@ export default function App() {
     };
 
     setProducts((prev) => [duplicatedProduct, ...prev]);
-    showToast(`Produk "${product.name}" berhasil disalin.`);
+
+    try {
+      await firestoreSaveProduct(duplicatedProduct);
+    } catch (err) {
+      console.error('[Cloud] Error duplicating product:', err);
+    }
+
+    showToast(`Produk "${product.name}" berhasil disalin ke Cloud.`);
   };
 
   // If user is logged out, display exact Login Screen
@@ -769,7 +877,7 @@ export default function App() {
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs font-mono tracking-wider uppercase px-5 py-3.5 flex items-center gap-3 border border-slate-700 shadow-xl rounded-lg animate-fade-in">
           <span className="material-symbols-outlined text-[18px] text-blue-400">
-            check_circle
+            cloud_done
           </span>
           <span>{toastMessage}</span>
         </div>
@@ -930,9 +1038,10 @@ export default function App() {
         isOpen={isNotifOpen}
         onClose={() => setIsNotifOpen(false)}
         notifications={notifications}
-        onMarkAllRead={() =>
-          setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
-        }
+        onMarkAllRead={() => {
+          setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+          firestoreMarkAllNotificationsRead();
+        }}
       />
     </div>
   );

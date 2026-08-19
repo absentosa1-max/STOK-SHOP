@@ -1,6 +1,6 @@
 {
   "name": "StockMaster Inventory System",
-  "description": "Professional stock and inventory management system with secure authentication, stock adjustment tracking, category filtering, and export capabilities.",
+  "description": "Professional stock and inventory management system with real-time Firebase cloud database synchronization, multi-user role management, live stock tracking, goods in/out ledger, and audit history.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
